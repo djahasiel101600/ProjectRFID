@@ -1,5 +1,6 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useMemo } from "react";
 import apiService from "../services/api";
+import { useAttendance } from "../hooks/useAttendance";
 import {
   Card,
   CardContent,
@@ -19,13 +20,10 @@ import {
   TableHeader,
   TableRow,
 } from "../components/ui/table";
-import type { AttendanceSession, Classroom } from "../types";
+import type { Classroom } from "../types";
 
 export function AttendanceReportsPage() {
-  const [sessions, setSessions] = useState<AttendanceSession[]>([]);
   const [classrooms, setClassrooms] = useState<Classroom[]>([]);
-  const [isLoading, setIsLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
 
   // Filter state
   const [selectedDate, setSelectedDate] = useState(
@@ -34,13 +32,30 @@ export function AttendanceReportsPage() {
   const [selectedClassroom, setSelectedClassroom] = useState<string>("");
   const [selectedStatus, setSelectedStatus] = useState<string>("");
 
+  // Create memoized filter object to prevent unnecessary re-renders
+  const filters = useMemo(
+    () => ({
+      date: selectedDate || undefined,
+      classroom: selectedClassroom ? parseInt(selectedClassroom) : undefined,
+      status: selectedStatus || undefined,
+    }),
+    [selectedDate, selectedClassroom, selectedStatus]
+  );
+
+  // Use the real-time attendance hook
+  const {
+    sessions,
+    stats,
+    isLoading,
+    error,
+    isConnected,
+    lastUpdate,
+    refresh,
+  } = useAttendance(filters);
+
   useEffect(() => {
     loadClassrooms();
   }, []);
-
-  useEffect(() => {
-    loadAttendance();
-  }, [selectedDate, selectedClassroom, selectedStatus]);
 
   const loadClassrooms = async () => {
     try {
@@ -48,27 +63,6 @@ export function AttendanceReportsPage() {
       setClassrooms(data);
     } catch (err) {
       console.error("Failed to load classrooms:", err);
-    }
-  };
-
-  const loadAttendance = async () => {
-    try {
-      setIsLoading(true);
-      const params: { date?: string; classroom?: number; status?: string } = {};
-
-      if (selectedDate) params.date = selectedDate;
-      if (selectedClassroom) params.classroom = parseInt(selectedClassroom);
-      if (selectedStatus) params.status = selectedStatus;
-
-      const data = await apiService.getAttendance(params);
-      setSessions(data);
-      setError(null);
-    } catch (err) {
-      setError(
-        err instanceof Error ? err.message : "Failed to load attendance"
-      );
-    } finally {
-      setIsLoading(false);
     }
   };
 
@@ -93,19 +87,28 @@ export function AttendanceReportsPage() {
     });
   };
 
-  // Calculate summary stats
-  const stats = {
-    total: sessions.length,
-    active: sessions.filter((s) => s.status === "IN").length,
-    completed: sessions.filter((s) => s.status === "AUTO_OUT").length,
-    invalid: sessions.filter((s) => s.status === "INVALID").length,
-  };
-
   return (
     <div className="space-y-6">
-      <div>
-        <h1 className="text-2xl font-bold">Attendance Reports</h1>
-        <p className="text-gray-500">View and filter attendance records</p>
+      <div className="flex justify-between items-start">
+        <div>
+          <h1 className="text-2xl font-bold">Attendance Reports</h1>
+          <p className="text-gray-500">View and filter attendance records</p>
+          <div className="flex items-center gap-2 mt-1">
+            <span
+              className={`inline-block w-2 h-2 rounded-full ${
+                isConnected ? "bg-green-500" : "bg-red-500"
+              }`}
+            ></span>
+            <span className="text-xs text-gray-400">
+              {isConnected ? "Real-time updates active" : "Connecting..."}
+              {lastUpdate &&
+                ` • Last updated: ${lastUpdate.toLocaleTimeString()}`}
+            </span>
+          </div>
+        </div>
+        <Button onClick={refresh} variant="outline" size="sm">
+          ↻ Refresh
+        </Button>
       </div>
 
       {/* Filters */}
@@ -153,7 +156,7 @@ export function AttendanceReportsPage() {
               </Select>
             </div>
             <div className="flex items-end">
-              <Button onClick={loadAttendance} className="w-full">
+              <Button onClick={refresh} className="w-full">
                 Apply Filters
               </Button>
             </div>

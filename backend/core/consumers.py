@@ -67,7 +67,22 @@ class IoTConsumer(AsyncWebsocketConsumer):
             power = data.get('power')
             timestamp_str = data.get('timestamp')
             
-            timestamp = datetime.fromisoformat(timestamp_str.replace('Z', '+00:00')) if timestamp_str else timezone.now()
+            # Parse timestamp from ESP32 or use server time
+            # ESP32 sends ISO format with timezone offset (e.g., 2026-01-11T01:30:00+08:00)
+            # or empty string if NTP sync failed
+            if timestamp_str and timestamp_str.strip():
+                try:
+                    # Handle both Z suffix (UTC) and offset format (+08:00)
+                    if timestamp_str.endswith('Z'):
+                        timestamp = datetime.fromisoformat(timestamp_str.replace('Z', '+00:00'))
+                    else:
+                        timestamp = datetime.fromisoformat(timestamp_str)
+                except ValueError:
+                    print(f"[IoT] Invalid timestamp format: {timestamp_str}, using server time")
+                    timestamp = timezone.now()
+            else:
+                # Use server time if no timestamp provided
+                timestamp = timezone.now()
             
             # Process RFID if present
             if rfid_uid:

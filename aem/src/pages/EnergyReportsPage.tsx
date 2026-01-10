@@ -1,5 +1,6 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useMemo } from "react";
 import apiService from "../services/api";
+import { useEnergy } from "../hooks/useEnergy";
 import {
   Card,
   CardContent,
@@ -17,13 +18,10 @@ import {
   TableHeader,
   TableRow,
 } from "../components/ui/table";
-import type { EnergyReport, Classroom } from "../types";
+import type { Classroom } from "../types";
 
 export function EnergyReportsPage() {
-  const [reports, setReports] = useState<EnergyReport[]>([]);
   const [classrooms, setClassrooms] = useState<Classroom[]>([]);
-  const [isLoading, setIsLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
 
   // Filter state
   const [selectedClassroom, setSelectedClassroom] = useState<string>("");
@@ -31,13 +29,22 @@ export function EnergyReportsPage() {
     "day"
   );
 
+  // Create memoized filter object to prevent unnecessary re-renders
+  const filters = useMemo(
+    () => ({
+      classroom: selectedClassroom ? parseInt(selectedClassroom) : undefined,
+      range: selectedRange,
+    }),
+    [selectedClassroom, selectedRange]
+  );
+
+  // Use the real-time energy hook
+  const { reports, stats, isLoading, error, isConnected, lastUpdate, refresh } =
+    useEnergy(filters);
+
   useEffect(() => {
     loadClassrooms();
   }, []);
-
-  useEffect(() => {
-    loadReport();
-  }, [selectedClassroom, selectedRange]);
 
   const loadClassrooms = async () => {
     try {
@@ -45,29 +52,6 @@ export function EnergyReportsPage() {
       setClassrooms(data);
     } catch (err) {
       console.error("Failed to load classrooms:", err);
-    }
-  };
-
-  const loadReport = async () => {
-    try {
-      setIsLoading(true);
-      const params: { classroom?: number; range?: "hour" | "day" | "month" } = {
-        range: selectedRange,
-      };
-
-      if (selectedClassroom) {
-        params.classroom = parseInt(selectedClassroom);
-      }
-
-      const data = await apiService.getEnergyReport(params);
-      setReports(data);
-      setError(null);
-    } catch (err) {
-      setError(
-        err instanceof Error ? err.message : "Failed to load energy report"
-      );
-    } finally {
-      setIsLoading(false);
     }
   };
 
@@ -97,26 +81,30 @@ export function EnergyReportsPage() {
     }
   };
 
-  // Calculate totals
-  const totals = reports.reduce(
-    (acc, r) => ({
-      totalKwh: acc.totalKwh + r.total_kwh,
-      avgWatts: acc.avgWatts + r.avg_watts,
-      maxWatts: Math.max(acc.maxWatts, r.max_watts),
-      count: acc.count + 1,
-    }),
-    { totalKwh: 0, avgWatts: 0, maxWatts: 0, count: 0 }
-  );
-
-  const avgWatts = totals.count > 0 ? totals.avgWatts / totals.count : 0;
-
   return (
     <div className="space-y-6">
-      <div>
-        <h1 className="text-2xl font-bold">Energy Consumption Reports</h1>
-        <p className="text-gray-500">
-          View energy usage by classroom and time period
-        </p>
+      <div className="flex justify-between items-start">
+        <div>
+          <h1 className="text-2xl font-bold">Energy Consumption Reports</h1>
+          <p className="text-gray-500">
+            View energy usage by classroom and time period
+          </p>
+          <div className="flex items-center gap-2 mt-1">
+            <span
+              className={`inline-block w-2 h-2 rounded-full ${
+                isConnected ? "bg-green-500" : "bg-red-500"
+              }`}
+            ></span>
+            <span className="text-xs text-gray-400">
+              {isConnected ? "Real-time updates active" : "Connecting..."}
+              {lastUpdate &&
+                ` • Last updated: ${lastUpdate.toLocaleTimeString()}`}
+            </span>
+          </div>
+        </div>
+        <Button onClick={refresh} variant="outline" size="sm">
+          ↻ Refresh
+        </Button>
       </div>
 
       {/* Filters */}
@@ -156,7 +144,7 @@ export function EnergyReportsPage() {
               </Select>
             </div>
             <div className="flex items-end">
-              <Button onClick={loadReport} className="w-full">
+              <Button onClick={refresh} className="w-full">
                 Generate Report
               </Button>
             </div>
@@ -170,28 +158,28 @@ export function EnergyReportsPage() {
           <CardContent className="pt-6">
             <p className="text-sm text-gray-500">Total Consumption</p>
             <p className="text-2xl font-bold text-blue-600">
-              {totals.totalKwh.toFixed(2)} kWh
+              {stats.totalKwh.toFixed(2)} kWh
             </p>
           </CardContent>
         </Card>
         <Card>
           <CardContent className="pt-6">
             <p className="text-sm text-gray-500">Average Power</p>
-            <p className="text-2xl font-bold">{avgWatts.toFixed(1)} W</p>
+            <p className="text-2xl font-bold">{stats.avgWatts.toFixed(1)} W</p>
           </CardContent>
         </Card>
         <Card>
           <CardContent className="pt-6">
             <p className="text-sm text-gray-500">Peak Power</p>
             <p className="text-2xl font-bold text-orange-600">
-              {totals.maxWatts.toFixed(1)} W
+              {stats.maxWatts.toFixed(1)} W
             </p>
           </CardContent>
         </Card>
         <Card>
           <CardContent className="pt-6">
             <p className="text-sm text-gray-500">Data Points</p>
-            <p className="text-2xl font-bold">{reports.length}</p>
+            <p className="text-2xl font-bold">{stats.dataPoints}</p>
           </CardContent>
         </Card>
       </div>
