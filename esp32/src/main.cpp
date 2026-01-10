@@ -56,9 +56,9 @@ const int CLASSROOM_ID = 1;                     // Your classroom ID
 const char *DEVICE_ID = "ESP32-ROOM-01";
 
 // NTP Configuration for Philippines Time (UTC+8)
-const char* NTP_SERVER = "pool.ntp.org";
-const long GMT_OFFSET_SEC = 8 * 3600;  // UTC+8 for Philippines
-const int DAYLIGHT_OFFSET_SEC = 0;     // No daylight saving in Philippines
+const char *NTP_SERVER = "pool.ntp.org";
+const long GMT_OFFSET_SEC = 8 * 3600; // UTC+8 for Philippines
+const int DAYLIGHT_OFFSET_SEC = 0;    // No daylight saving in Philippines
 
 // ============== PIN DEFINITIONS ==============
 // RFID RC522 Pins
@@ -88,7 +88,7 @@ LiquidCrystal_I2C lcd(LCD_ADDRESS, LCD_COLUMNS, LCD_ROWS);
 
 // ============== STATE VARIABLES ==============
 bool wsConnected = false;
-bool timeSync = false;  // Track if time is synced with NTP
+bool timeSync = false; // Track if time is synced with NTP
 unsigned long lastPowerRead = 0;
 unsigned long lastRfidRead = 0;
 unsigned long lastLcdUpdate = 0;
@@ -132,7 +132,7 @@ void setup()
     displayMessage("Initializing...", "Please wait");
 
     setupWiFi();
-    setupNTP();  // Sync time with NTP after WiFi is connected
+    setupNTP(); // Sync time with NTP after WiFi is connected
     setupRFID();
     setupUltrasonic();
     setupWebSocket();
@@ -416,12 +416,13 @@ void sendHeartbeat()
 String getISOTimestamp()
 {
     struct tm timeinfo;
-    if (!getLocalTime(&timeinfo)) {
+    if (!getLocalTime(&timeinfo))
+    {
         Serial.println("Failed to obtain time, using fallback");
         // Return empty string to let server use its own time
         return "";
     }
-    
+
     // Format as ISO 8601 with timezone offset for Philippines (UTC+8)
     char timestamp[30];
     sprintf(timestamp, "%04d-%02d-%02dT%02d:%02d:%02d+08:00",
@@ -439,19 +440,21 @@ void setupNTP()
 {
     Serial.println("Configuring NTP time...");
     displayMessage("Syncing Time...", "");
-    
+
     configTime(GMT_OFFSET_SEC, DAYLIGHT_OFFSET_SEC, NTP_SERVER);
-    
+
     // Wait for time to be set (max 10 seconds)
     struct tm timeinfo;
     int attempts = 0;
-    while (!getLocalTime(&timeinfo) && attempts < 10) {
+    while (!getLocalTime(&timeinfo) && attempts < 10)
+    {
         Serial.println("Waiting for NTP time sync...");
         delay(1000);
         attempts++;
     }
-    
-    if (getLocalTime(&timeinfo)) {
+
+    if (getLocalTime(&timeinfo))
+    {
         timeSync = true;
         Serial.println("NTP Time synchronized!");
         Serial.printf("Current time: %04d-%02d-%02d %02d:%02d:%02d\n",
@@ -462,7 +465,9 @@ void setupNTP()
                       timeinfo.tm_min,
                       timeinfo.tm_sec);
         displayMessage("Time Synced!", "");
-    } else {
+    }
+    else
+    {
         timeSync = false;
         Serial.println("WARNING: Could not sync time with NTP");
         displayMessage("Time Sync Fail", "Using server time");
@@ -626,7 +631,8 @@ long myMap(long x, long in_min, long in_max, long out_min, long out_max)
 String formatTime()
 {
     struct tm timeinfo;
-    if (!getLocalTime(&timeinfo)) {
+    if (!getLocalTime(&timeinfo))
+    {
         return "--:--";
     }
     char buffer[6];

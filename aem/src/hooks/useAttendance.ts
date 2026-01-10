@@ -23,18 +23,24 @@ export function useAttendance(filters: AttendanceFilters = {}) {
   const fetchData = useCallback(async () => {
     try {
       setIsLoading(true);
+      setError(null);
       const params: { date?: string; classroom?: number; status?: string } = {};
 
       if (filtersRef.current.date) params.date = filtersRef.current.date;
       if (filtersRef.current.classroom) params.classroom = filtersRef.current.classroom;
       if (filtersRef.current.status) params.status = filtersRef.current.status;
 
+      console.log('Fetching attendance with params:', params);
       const data = await apiService.getAttendance(params);
-      setSessions(data);
-      setError(null);
+      console.log('Attendance data received:', data);
+      
+      // Ensure we always set an array
+      setSessions(Array.isArray(data) ? data : []);
       setLastUpdate(new Date());
     } catch (err) {
+      console.error('Failed to fetch attendance:', err);
       setError(err instanceof Error ? err.message : 'Failed to fetch attendance data');
+      setSessions([]);
     } finally {
       setIsLoading(false);
     }

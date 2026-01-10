@@ -27,20 +27,26 @@ export function useDashboard(classroomId?: number) {
 
     // Connect to WebSocket
     wsService.connect(classroomId);
-    setIsConnected(true);
 
     // Subscribe to updates
     const unsubscribe = wsService.subscribe((message: WSMessage) => {
+      console.log('Dashboard WebSocket message:', message.type, message);
+      
       switch (message.type) {
         case 'initial_data':
-          setData(message.data);
+          setIsConnected(true);
+          if (message.data) {
+            setData(message.data);
+          }
           break;
         case 'attendance':
-          // Refresh data on attendance events
+          // Refresh data on attendance events to update classroom cards
+          console.log('Attendance event - refreshing dashboard data');
           fetchData();
           break;
         case 'power':
-          // Update power for specific classroom
+          // Update power for specific classroom in real-time
+          console.log('Power update for classroom:', message.classroom_id, message.watts, 'W');
           setData(prev => {
             if (!prev) return prev;
             return {
@@ -55,13 +61,20 @@ export function useDashboard(classroomId?: number) {
           break;
         case 'auto_timeout':
           // Refresh data on auto-timeout
+          console.log('Auto-timeout event - refreshing dashboard data');
           fetchData();
           break;
       }
     });
 
+    // Check connection status periodically
+    const connectionCheck = setInterval(() => {
+      setIsConnected(wsService.isConnected());
+    }, 5000);
+
     return () => {
       unsubscribe();
+      clearInterval(connectionCheck);
       wsService.disconnect();
     };
   }, [classroomId, fetchData]);

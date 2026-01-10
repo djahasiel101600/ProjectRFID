@@ -25,10 +25,8 @@ import type { Classroom } from "../types";
 export function AttendanceReportsPage() {
   const [classrooms, setClassrooms] = useState<Classroom[]>([]);
 
-  // Filter state
-  const [selectedDate, setSelectedDate] = useState(
-    new Date().toISOString().split("T")[0]
-  );
+  // Filter state - start with empty date to show all records
+  const [selectedDate, setSelectedDate] = useState("");
   const [selectedClassroom, setSelectedClassroom] = useState<string>("");
   const [selectedStatus, setSelectedStatus] = useState<string>("");
 
@@ -120,12 +118,28 @@ export function AttendanceReportsPage() {
           <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
             <div>
               <Label htmlFor="date">Date</Label>
-              <Input
-                id="date"
-                type="date"
-                value={selectedDate}
-                onChange={(e) => setSelectedDate(e.target.value)}
-              />
+              <div className="flex gap-2">
+                <Input
+                  id="date"
+                  type="date"
+                  value={selectedDate}
+                  onChange={(e) => setSelectedDate(e.target.value)}
+                  className="flex-1"
+                />
+                {selectedDate && (
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => setSelectedDate("")}
+                    title="Clear date filter"
+                  >
+                    ✕
+                  </Button>
+                )}
+              </div>
+              <p className="text-xs text-gray-400 mt-1">
+                {selectedDate ? "" : "Showing all dates"}
+              </p>
             </div>
             <div>
               <Label htmlFor="classroom">Classroom</Label>

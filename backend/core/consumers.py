@@ -9,7 +9,8 @@ class IoTConsumer(AsyncWebsocketConsumer):
     """WebSocket consumer for ESP32 devices."""
     
     async def connect(self):
-        self.classroom_id = self.scope['url_route']['kwargs']['classroom_id']
+        # Convert classroom_id to int for consistent handling
+        self.classroom_id = int(self.scope['url_route']['kwargs']['classroom_id'])
         self.room_group_name = f'iot_classroom_{self.classroom_id}'
         
         print(f"[IoT] Connection attempt for classroom {self.classroom_id}")
@@ -89,10 +90,12 @@ class IoTConsumer(AsyncWebsocketConsumer):
                 result = await self.process_rfid(rfid_uid, timestamp)
                 
                 # Broadcast attendance event to dashboard
+                print(f"[IoT] Broadcasting attendance event to dashboard_classroom_{self.classroom_id}")
                 await self.channel_layer.group_send(
                     f'dashboard_classroom_{self.classroom_id}',
                     {
                         'type': 'attendance_event',
+                        'classroom_id': self.classroom_id,
                         'event': result['event'],
                         'data': result['data']
                     }
@@ -103,10 +106,12 @@ class IoTConsumer(AsyncWebsocketConsumer):
                 await self.save_energy_log(power, timestamp)
                 
                 # Broadcast power update to dashboard
+                print(f"[IoT] Broadcasting power update to dashboard_classroom_{self.classroom_id}: {power}W")
                 await self.channel_layer.group_send(
                     f'dashboard_classroom_{self.classroom_id}',
                     {
                         'type': 'power_update',
+                        'classroom_id': self.classroom_id,
                         'watts': power,
                         'timestamp': timestamp.isoformat()
                     }
@@ -271,12 +276,16 @@ class DashboardConsumer(AsyncWebsocketConsumer):
     """WebSocket consumer for frontend dashboard."""
     
     async def connect(self):
-        self.classroom_id = self.scope['url_route']['kwargs'].get('classroom_id')
+        # Convert classroom_id to int for consistent handling (or None if not provided)
+        classroom_id_str = self.scope['url_route']['kwargs'].get('classroom_id')
+        self.classroom_id = int(classroom_id_str) if classroom_id_str else None
         
         if self.classroom_id:
             self.room_group_name = f'dashboard_classroom_{self.classroom_id}'
         else:
             self.room_group_name = 'dashboard_all'
+        
+        print(f"[Dashboard] Connecting to group: {self.room_group_name}")
         
         # Join room group (only if channel layer is available)
         if self.channel_layer is not None:
@@ -288,6 +297,7 @@ class DashboardConsumer(AsyncWebsocketConsumer):
             # If subscribing to all, also join individual classroom groups
             if not self.classroom_id:
                 classrooms = await self.get_active_classrooms()
+                print(f"[Dashboard] Joining classroom groups: {classrooms}")
                 for classroom_id in classrooms:
                     await self.channel_layer.group_add(
                         f'dashboard_classroom_{classroom_id}',
@@ -295,6 +305,7 @@ class DashboardConsumer(AsyncWebsocketConsumer):
                     )
         
         await self.accept()
+        print(f"[Dashboard] Connection accepted")
         
         # Send initial data
         try:
@@ -334,17 +345,20 @@ class DashboardConsumer(AsyncWebsocketConsumer):
     
     async def attendance_event(self, event):
         """Handle attendance event broadcasts."""
+        print(f"[Dashboard] Received attendance event: {event}")
         await self.send(text_data=json.dumps({
             'type': 'attendance',
+            'classroom_id': event.get('classroom_id'),
             'event': event['event'],
             'data': event['data']
         }))
     
     async def power_update(self, event):
         """Handle power update broadcasts."""
+        print(f"[Dashboard] Received power update: {event}")
         await self.send(text_data=json.dumps({
             'type': 'power',
-            'classroom_id': self.classroom_id,
+            'classroom_id': event.get('classroom_id'),
             'watts': event['watts'],
             'timestamp': event['timestamp']
         }))

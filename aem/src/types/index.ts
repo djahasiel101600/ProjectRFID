@@ -111,6 +111,7 @@ export interface AttendanceReport {
 // WebSocket message types
 export interface WSAttendanceEvent {
   type: 'attendance';
+  classroom_id?: number;
   event: 'attendance_in' | 'attendance_duplicate' | 'attendance_invalid' | 'attendance_error';
   data: {
     session_id?: number;

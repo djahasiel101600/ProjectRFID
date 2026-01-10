@@ -225,8 +225,13 @@ class ApiService {
     if (params?.status) searchParams.append('status', params.status);
 
     const query = searchParams.toString();
-    const response = await this.request<{ results: AttendanceSession[] }>(`/attendance/${query ? `?${query}` : ''}`);
-    return response.results || response as unknown as AttendanceSession[];
+    const response = await this.request<{ results?: AttendanceSession[] } | AttendanceSession[]>(`/attendance/${query ? `?${query}` : ''}`);
+    
+    // Handle both paginated response (with results) and direct array response
+    if (Array.isArray(response)) {
+      return response;
+    }
+    return response.results || [];
   }
 
   async getTodayAttendance(): Promise<AttendanceSession[]> {
