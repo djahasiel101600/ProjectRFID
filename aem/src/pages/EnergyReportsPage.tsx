@@ -1,6 +1,7 @@
 import { useState, useEffect, useMemo } from "react";
 import apiService from "../services/api";
 import { useEnergy } from "../hooks/useEnergy";
+import { EnergyChart } from "../components/EnergyChart";
 import {
   Card,
   CardContent,
@@ -22,6 +23,9 @@ import type { Classroom } from "../types";
 
 export function EnergyReportsPage() {
   const [classrooms, setClassrooms] = useState<Classroom[]>([]);
+  const [chartType, setChartType] = useState<"area" | "bar" | "composed">(
+    "composed"
+  );
 
   // Filter state
   const [selectedClassroom, setSelectedClassroom] = useState<string>("");
@@ -184,17 +188,42 @@ export function EnergyReportsPage() {
         </Card>
       </div>
 
-      {/* Energy Chart Placeholder */}
+      {/* Energy Chart */}
       <Card>
         <CardHeader>
-          <CardTitle>Energy Consumption Over Time</CardTitle>
+          <div className="flex justify-between items-center">
+            <CardTitle>Energy Consumption Over Time</CardTitle>
+            <div className="flex gap-2">
+              <Button
+                variant={chartType === "composed" ? "default" : "outline"}
+                size="sm"
+                onClick={() => setChartType("composed")}
+              >
+                Combined
+              </Button>
+              <Button
+                variant={chartType === "bar" ? "default" : "outline"}
+                size="sm"
+                onClick={() => setChartType("bar")}
+              >
+                Bar
+              </Button>
+              <Button
+                variant={chartType === "area" ? "default" : "outline"}
+                size="sm"
+                onClick={() => setChartType("area")}
+              >
+                Area
+              </Button>
+            </div>
+          </div>
         </CardHeader>
         <CardContent>
-          <div className="h-64 flex items-center justify-center bg-gray-50 dark:bg-gray-800 rounded-lg">
-            <p className="text-gray-500">
-              Chart visualization would be rendered here using Recharts
-            </p>
-          </div>
+          <EnergyChart
+            data={reports}
+            range={selectedRange}
+            chartType={chartType}
+          />
         </CardContent>
       </Card>
 
