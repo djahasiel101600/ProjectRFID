@@ -1,0 +1,22 @@
+# Django and REST Framework
+Django>=5.0
+djangorestframework>=3.14
+djangorestframework-simplejwt>=5.3
+django-cors-headers>=4.3
+
+# Django Channels for WebSocket support
+channels>=4.0
+daphne>=4.0
+
+# For production WebSocket backend (optional)
+# channels-redis>=4.1
+
+# Database
+psycopg2-binary>=2.9  # For PostgreSQL
+
+# Background tasks (optional, for Celery)
+# celery>=5.3
+# django-celery-beat>=2.5
+
+# Development
+python-dotenv>=1.0
