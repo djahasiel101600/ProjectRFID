@@ -1,4 +1,5 @@
 #include <Wire.h>
+#include <time.h>
 
 /**
  * IoT Attendance & Energy Monitoring System - ESP32 Firmware
@@ -54,6 +55,11 @@ const int CLASSROOM_ID = 1;                     // Your classroom ID
 // Device Configuration
 const char *DEVICE_ID = "ESP32-ROOM-01";
 
+// NTP Configuration for Philippines Time (UTC+8)
+const char* NTP_SERVER = "pool.ntp.org";
+const long GMT_OFFSET_SEC = 8 * 3600;  // UTC+8 for Philippines
+const int DAYLIGHT_OFFSET_SEC = 0;     // No daylight saving in Philippines
+
 // ============== PIN DEFINITIONS ==============
 // RFID RC522 Pins
 #define RFID_SS_PIN 5
@@ -82,6 +88,7 @@ LiquidCrystal_I2C lcd(LCD_ADDRESS, LCD_COLUMNS, LCD_ROWS);
 
 // ============== STATE VARIABLES ==============
 bool wsConnected = false;
+bool timeSync = false;  // Track if time is synced with NTP
 unsigned long lastPowerRead = 0;
 unsigned long lastRfidRead = 0;
 unsigned long lastLcdUpdate = 0;
@@ -99,6 +106,8 @@ void setupWebSocket();
 void setupRFID();
 void setupLCD();
 void setupUltrasonic();
+void setupNTP();
+bool isTimeSynced();
 
 void webSocketEvent(WStype_t type, uint8_t *payload, size_t length);
 void sendRfidData(String rfidUid);
@@ -123,6 +132,7 @@ void setup()
     displayMessage("Initializing...", "Please wait");
 
     setupWiFi();
+    setupNTP();  // Sync time with NTP after WiFi is connected
     setupRFID();
     setupUltrasonic();
     setupWebSocket();
@@ -405,17 +415,64 @@ void sendHeartbeat()
 // ============== GET ISO TIMESTAMP ==============
 String getISOTimestamp()
 {
-    // In a real implementation, you'd use NTP time
-    // For now, return a placeholder that the server will replace
-    unsigned long ms = millis();
-    int hours = (ms / 3600000) % 24;
-    int minutes = (ms / 60000) % 60;
-    int seconds = (ms / 1000) % 60;
-
-    // Zero-pad values for ISO format
+    struct tm timeinfo;
+    if (!getLocalTime(&timeinfo)) {
+        Serial.println("Failed to obtain time, using fallback");
+        // Return empty string to let server use its own time
+        return "";
+    }
+    
+    // Format as ISO 8601 with timezone offset for Philippines (UTC+8)
     char timestamp[30];
-    sprintf(timestamp, "2026-01-11T%02d:%02d:%02dZ", hours, minutes, seconds);
+    sprintf(timestamp, "%04d-%02d-%02dT%02d:%02d:%02d+08:00",
+            timeinfo.tm_year + 1900,
+            timeinfo.tm_mon + 1,
+            timeinfo.tm_mday,
+            timeinfo.tm_hour,
+            timeinfo.tm_min,
+            timeinfo.tm_sec);
     return String(timestamp);
+}
+
+// ============== NTP SETUP ==============
+void setupNTP()
+{
+    Serial.println("Configuring NTP time...");
+    displayMessage("Syncing Time...", "");
+    
+    configTime(GMT_OFFSET_SEC, DAYLIGHT_OFFSET_SEC, NTP_SERVER);
+    
+    // Wait for time to be set (max 10 seconds)
+    struct tm timeinfo;
+    int attempts = 0;
+    while (!getLocalTime(&timeinfo) && attempts < 10) {
+        Serial.println("Waiting for NTP time sync...");
+        delay(1000);
+        attempts++;
+    }
+    
+    if (getLocalTime(&timeinfo)) {
+        timeSync = true;
+        Serial.println("NTP Time synchronized!");
+        Serial.printf("Current time: %04d-%02d-%02d %02d:%02d:%02d\n",
+                      timeinfo.tm_year + 1900,
+                      timeinfo.tm_mon + 1,
+                      timeinfo.tm_mday,
+                      timeinfo.tm_hour,
+                      timeinfo.tm_min,
+                      timeinfo.tm_sec);
+        displayMessage("Time Synced!", "");
+    } else {
+        timeSync = false;
+        Serial.println("WARNING: Could not sync time with NTP");
+        displayMessage("Time Sync Fail", "Using server time");
+    }
+    delay(500);
+}
+
+bool isTimeSynced()
+{
+    return timeSync;
 }
 
 // ============== RFID SETUP & READ ==============
@@ -496,9 +553,10 @@ void updateLCD()
 {
     lcd.clear();
 
-    // Line 1: Status and connection
-    String line1 = wsConnected ? "Online" : "Offline";
-    line1 += " " + String(currentPower, 1) + "W";
+    // Line 1: Time, Status and Power
+    String line1 = formatTime();
+    line1 += wsConnected ? " ON " : " OFF";
+    line1 += String(currentPower, 0) + "W";
     lcd.setCursor(0, 0);
     lcd.print(line1.substring(0, LCD_COLUMNS));
 
@@ -563,4 +621,15 @@ float readUltrasonicPower()
 long myMap(long x, long in_min, long in_max, long out_min, long out_max)
 {
     return (x - in_min) * (out_max - out_min) / (in_max - in_min) + out_min;
+}
+
+String formatTime()
+{
+    struct tm timeinfo;
+    if (!getLocalTime(&timeinfo)) {
+        return "--:--";
+    }
+    char buffer[6];
+    sprintf(buffer, "%02d:%02d", timeinfo.tm_hour, timeinfo.tm_min);
+    return String(buffer);
 }
