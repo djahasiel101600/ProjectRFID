@@ -1,19 +1,30 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import type { DashboardData, WSMessage } from '../types';
 import apiService from '../services/api';
 import wsService from '../services/websocket';
+import type { PowerReading } from '../components/RealtimePowerChart';
+
+const MAX_POWER_HISTORY = 100; // Keep last 100 readings
 
 export function useDashboard(classroomId?: number) {
   const [data, setData] = useState<DashboardData | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [isConnected, setIsConnected] = useState(false);
+  const [powerHistory, setPowerHistory] = useState<PowerReading[]>([]);
+  const classroomNamesRef = useRef<Map<number, string>>(new Map());
 
   const fetchData = useCallback(async () => {
     try {
       setIsLoading(true);
       const dashboardData = await apiService.getDashboard();
       setData(dashboardData);
+      
+      // Cache classroom names for power history
+      dashboardData.classrooms.forEach(c => {
+        classroomNamesRef.current.set(c.id, c.name);
+      });
+      
       setError(null);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to fetch dashboard data');
@@ -47,6 +58,21 @@ export function useDashboard(classroomId?: number) {
         case 'power':
           // Update power for specific classroom in real-time
           console.log('Power update for classroom:', message.classroom_id, message.watts, 'W');
+          
+          // Add to power history for real-time chart
+          setPowerHistory(prev => {
+            const newReading: PowerReading = {
+              timestamp: message.timestamp || new Date().toISOString(),
+              watts: message.watts,
+              classroomId: message.classroom_id,
+              classroomName: classroomNamesRef.current.get(message.classroom_id) || `Room ${message.classroom_id}`,
+            };
+            const updated = [...prev, newReading];
+            // Keep only last MAX_POWER_HISTORY readings
+            return updated.slice(-MAX_POWER_HISTORY);
+          });
+          
+          // Update dashboard data
           setData(prev => {
             if (!prev) return prev;
             return {
@@ -84,7 +110,11 @@ export function useDashboard(classroomId?: number) {
     fetchData();
   };
 
-  return { data, isLoading, error, isConnected, refresh };
+  const clearPowerHistory = () => {
+    setPowerHistory([]);
+  };
+
+  return { data, isLoading, error, isConnected, powerHistory, refresh, clearPowerHistory };
 }
 
 export function useCountdown(targetSeconds: number | null) {

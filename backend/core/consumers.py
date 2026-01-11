@@ -71,6 +71,7 @@ class IoTConsumer(AsyncWebsocketConsumer):
             # Parse timestamp from ESP32 or use server time
             # ESP32 sends ISO format with timezone offset (e.g., 2026-01-11T01:30:00+08:00)
             # or empty string if NTP sync failed
+            # Since USE_TZ=False, we need naive datetimes (no timezone info)
             if timestamp_str and timestamp_str.strip():
                 try:
                     # Handle both Z suffix (UTC) and offset format (+08:00)
@@ -78,6 +79,10 @@ class IoTConsumer(AsyncWebsocketConsumer):
                         timestamp = datetime.fromisoformat(timestamp_str.replace('Z', '+00:00'))
                     else:
                         timestamp = datetime.fromisoformat(timestamp_str)
+                    # Convert to naive datetime by removing timezone info
+                    # The timestamp is already in local time (Asia/Manila), just strip tzinfo
+                    if timestamp.tzinfo is not None:
+                        timestamp = timestamp.replace(tzinfo=None)
                 except ValueError:
                     print(f"[IoT] Invalid timestamp format: {timestamp_str}, using server time")
                     timestamp = timezone.now()
@@ -85,9 +90,9 @@ class IoTConsumer(AsyncWebsocketConsumer):
                 # Use server time if no timestamp provided
                 timestamp = timezone.now()
             
-            # Process RFID if present
+            # Process RFID if present (server time is used internally)
             if rfid_uid:
-                result = await self.process_rfid(rfid_uid, timestamp)
+                result = await self.process_rfid(rfid_uid)
                 
                 # Broadcast attendance event to dashboard
                 print(f"[IoT] Broadcasting attendance event to dashboard_classroom_{self.classroom_id}")
@@ -103,9 +108,9 @@ class IoTConsumer(AsyncWebsocketConsumer):
             
             # Process power reading if present
             if power is not None:
-                await self.save_energy_log(power, timestamp)
+                energy_log = await self.save_energy_log(power)
                 
-                # Broadcast power update to dashboard
+                # Broadcast power update to dashboard (use the auto-generated timestamp)
                 print(f"[IoT] Broadcasting power update to dashboard_classroom_{self.classroom_id}: {power}W")
                 await self.channel_layer.group_send(
                     f'dashboard_classroom_{self.classroom_id}',
@@ -113,7 +118,7 @@ class IoTConsumer(AsyncWebsocketConsumer):
                         'type': 'power_update',
                         'classroom_id': self.classroom_id,
                         'watts': power,
-                        'timestamp': timestamp.isoformat()
+                        'timestamp': energy_log.timestamp.isoformat() if energy_log else timezone.now().isoformat()
                     }
                 )
             
@@ -154,8 +159,11 @@ class IoTConsumer(AsyncWebsocketConsumer):
             return False, f"Classroom {self.classroom_id} does not exist"
     
     @database_sync_to_async
-    def process_rfid(self, rfid_uid, timestamp):
-        """Process RFID scan and create attendance record."""
+    def process_rfid(self, rfid_uid):
+        """Process RFID scan and create attendance record.
+        
+        Uses server time for all timestamps - server is the single source of truth.
+        """
         from core.models import User, Classroom, Schedule, AttendanceSession
         from django.db.models import Q
         
@@ -164,9 +172,27 @@ class IoTConsumer(AsyncWebsocketConsumer):
             teacher = User.objects.get(rfid_uid=rfid_uid, role='teacher', is_active=True)
             classroom = Classroom.objects.get(id=self.classroom_id)
             
-            today = timestamp.date()
-            current_time = timestamp.time()
-            day_of_week = timestamp.weekday()
+            # Use server time - single source of truth
+            now = datetime.now()
+            today = now.date()
+            current_time = now.time()
+            day_of_week = now.weekday()
+            
+            # DEBUG: Print current context
+            print(f"\n{'='*60}")
+            print(f"[RFID DEBUG] Processing RFID scan")
+            print(f"[RFID DEBUG] Teacher: {teacher.get_full_name()} (ID: {teacher.id})")
+            print(f"[RFID DEBUG] Classroom: {classroom.name} (ID: {classroom.id})")
+            print(f"[RFID DEBUG] Server Time: {now.strftime('%Y-%m-%d %H:%M:%S')}")
+            print(f"[RFID DEBUG] Day of Week: {day_of_week} (0=Mon, 1=Tue, 2=Wed, 3=Thu, 4=Fri, 5=Sat, 6=Sun)")
+            print(f"[RFID DEBUG] Current Time: {current_time}")
+            print(f"{'='*60}")
+            
+            # DEBUG: List all schedules for this teacher
+            all_teacher_schedules = Schedule.objects.filter(teacher=teacher)
+            print(f"[RFID DEBUG] All schedules for {teacher.get_full_name()}:")
+            for s in all_teacher_schedules:
+                print(f"  - Classroom: {s.classroom.name} (ID: {s.classroom.id}), Day: {s.day_of_week}, Time: {s.start_time} - {s.end_time}")
             
             # Check if there's already an active session for this teacher today
             existing_session = AttendanceSession.objects.filter(
@@ -177,6 +203,7 @@ class IoTConsumer(AsyncWebsocketConsumer):
             ).first()
             
             if existing_session:
+                print(f"[RFID DEBUG] DUPLICATE: Already has active session (ID: {existing_session.id})")
                 return {
                     'event': 'attendance_duplicate',
                     'data': {
@@ -186,7 +213,11 @@ class IoTConsumer(AsyncWebsocketConsumer):
                     }
                 }
             
-            # Find matching schedule
+            # Find matching schedule - currently during class time
+            print(f"\n[RFID DEBUG] Checking for schedule during class time:")
+            print(f"[RFID DEBUG] Query: teacher={teacher.id}, classroom={classroom.id}, day={day_of_week}")
+            print(f"[RFID DEBUG] Query: start_time <= {current_time} AND end_time >= {current_time}")
+            
             schedule = Schedule.objects.filter(
                 teacher=teacher,
                 classroom=classroom,
@@ -195,9 +226,17 @@ class IoTConsumer(AsyncWebsocketConsumer):
                 end_time__gte=current_time
             ).first()
             
+            if schedule:
+                print(f"[RFID DEBUG] FOUND schedule (during class): {schedule.start_time} - {schedule.end_time}")
+            else:
+                print(f"[RFID DEBUG] No schedule found during class time")
+            
             # Also check for schedule starting within 15 minutes
             if not schedule:
                 time_threshold = (datetime.combine(today, current_time) + timedelta(minutes=15)).time()
+                print(f"\n[RFID DEBUG] Checking for schedule starting within 15 minutes:")
+                print(f"[RFID DEBUG] Query: start_time >= {current_time} AND start_time <= {time_threshold}")
+                
                 schedule = Schedule.objects.filter(
                     teacher=teacher,
                     classroom=classroom,
@@ -205,26 +244,62 @@ class IoTConsumer(AsyncWebsocketConsumer):
                     start_time__gte=current_time,
                     start_time__lte=time_threshold
                 ).first()
+                
+                if schedule:
+                    print(f"[RFID DEBUG] FOUND schedule (within 15 min): {schedule.start_time} - {schedule.end_time}")
+                else:
+                    print(f"[RFID DEBUG] No schedule found within 15 minutes")
+                    
+                    # DEBUG: Check what schedules exist for this classroom today
+                    today_schedules = Schedule.objects.filter(
+                        teacher=teacher,
+                        classroom=classroom,
+                        day_of_week=day_of_week
+                    )
+                    print(f"\n[RFID DEBUG] All schedules for this teacher in this classroom TODAY (day={day_of_week}):")
+                    if today_schedules.exists():
+                        for s in today_schedules:
+                            match_start = s.start_time <= current_time
+                            match_end = s.end_time >= current_time
+                            within_15 = current_time <= s.start_time <= time_threshold
+                            print(f"  - {s.start_time} - {s.end_time}")
+                            print(f"    start_time({s.start_time}) <= current({current_time}): {match_start}")
+                            print(f"    end_time({s.end_time}) >= current({current_time}): {match_end}")
+                            print(f"    Within 15 min window ({current_time} to {time_threshold}): {within_15}")
+                    else:
+                        print(f"  (No schedules found for today)")
             
             # Create attendance session
             if schedule:
+                # Use naive datetime since USE_TZ=False
                 expected_out = datetime.combine(today, schedule.end_time)
-                expected_out = timezone.make_aware(expected_out)
                 status = 'IN'
+                print(f"\n[RFID DEBUG] RESULT: VALID - Creating session with status IN")
             else:
                 expected_out = None
                 status = 'INVALID'
+                print(f"\n[RFID DEBUG] RESULT: INVALID - No matching schedule found")
+            
+            print(f"{'='*60}\n")
             
             session = AttendanceSession.objects.create(
                 teacher=teacher,
                 classroom=classroom,
                 schedule=schedule,
                 date=today,
-                time_in=timestamp,
+                # time_in uses auto_now_add=True - server sets it automatically
                 expected_out=expected_out,
                 status=status,
                 rfid_uid_used=rfid_uid
             )
+            
+            # Schedule real-time timeout if valid session with expected_out
+            if status == 'IN' and expected_out:
+                try:
+                    from core.tasks import schedule_session_timeout
+                    schedule_session_timeout(session)
+                except Exception as e:
+                    print(f"[RFID] Warning: Could not schedule timeout task: {e}")
             
             event_type = 'attendance_in' if status == 'IN' else 'attendance_invalid'
             
@@ -236,7 +311,7 @@ class IoTConsumer(AsyncWebsocketConsumer):
                     'teacher_id': teacher.id,
                     'classroom': classroom.name,
                     'classroom_id': classroom.id,
-                    'time': timestamp.strftime('%H:%M'),
+                    'time': session.time_in.strftime('%H:%M'),  # Use session's auto-set time
                     'expected_out': expected_out.strftime('%H:%M') if expected_out else None,
                     'status': status,
                     'schedule_subject': schedule.subject if schedule else None
@@ -260,16 +335,17 @@ class IoTConsumer(AsyncWebsocketConsumer):
             }
     
     @database_sync_to_async
-    def save_energy_log(self, watts, timestamp):
-        """Save energy reading to database."""
+    def save_energy_log(self, watts):
+        """Save energy reading to database. Timestamp is auto-set by the model."""
         from core.models import Classroom, EnergyLog
         
         classroom = Classroom.objects.get(id=self.classroom_id)
-        EnergyLog.objects.create(
+        energy_log = EnergyLog.objects.create(
             classroom=classroom,
-            watts=watts,
-            timestamp=timestamp
+            watts=watts
+            # timestamp is auto_now_add - set automatically
         )
+        return energy_log
 
 
 class DashboardConsumer(AsyncWebsocketConsumer):

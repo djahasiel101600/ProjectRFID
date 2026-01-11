@@ -366,7 +366,7 @@ void sendRfidData(String rfidUid)
     doc["device_id"] = DEVICE_ID;
     doc["rfid_uid"] = rfidUid;
     doc["power"] = currentPower;
-    doc["timestamp"] = getISOTimestamp();
+    // No timestamp needed - server uses auto_now_add for time_in
 
     String jsonString;
     serializeJson(doc, jsonString);
@@ -386,7 +386,7 @@ void sendPowerData(float watts)
 
     doc["device_id"] = DEVICE_ID;
     doc["power"] = watts;
-    doc["timestamp"] = getISOTimestamp();
+    // No timestamp needed - server uses auto_now_add
 
     String jsonString;
     serializeJson(doc, jsonString);
@@ -404,7 +404,7 @@ void sendHeartbeat()
 
     doc["device_id"] = DEVICE_ID;
     doc["type"] = "heartbeat";
-    doc["timestamp"] = getISOTimestamp();
+    // No timestamp needed
 
     String jsonString;
     serializeJson(doc, jsonString);

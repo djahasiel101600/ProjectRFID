@@ -1,4 +1,5 @@
 import { useDashboard, useCountdown } from "../hooks/useDashboard";
+import { RealtimePowerChart } from "../components/RealtimePowerChart";
 import {
   Card,
   CardContent,
@@ -103,7 +104,8 @@ function StatsCard({
 }
 
 export function DashboardPage() {
-  const { data, isLoading, error, isConnected, refresh } = useDashboard();
+  const { data, isLoading, error, isConnected, powerHistory, refresh } =
+    useDashboard();
 
   if (isLoading) {
     return (
@@ -181,6 +183,13 @@ export function DashboardPage() {
           variant={(data.stats?.invalid ?? 0) > 0 ? "danger" : "default"}
         />
       </div>
+
+      {/* Real-Time Power Chart */}
+      <RealtimePowerChart
+        data={powerHistory}
+        title="Real-Time Power Consumption"
+        maxPoints={30}
+      />
 
       {/* Classroom Grid */}
       <div>

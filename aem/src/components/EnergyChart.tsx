@@ -13,6 +13,7 @@ import {
   Line,
 } from "recharts";
 import type { EnergyReport } from "../types";
+import { parseLocalDateTime } from "../lib/utils";
 
 interface EnergyChartProps {
   data: EnergyReport[];
@@ -27,7 +28,8 @@ export function EnergyChart({
 }: EnergyChartProps) {
   // Format period label based on range
   const formatPeriodLabel = (period: string) => {
-    const date = new Date(period);
+    const date = parseLocalDateTime(period);
+    if (!date) return period;
     switch (range) {
       case "hour":
         return date.toLocaleString("en-US", {

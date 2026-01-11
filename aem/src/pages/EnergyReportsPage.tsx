@@ -2,6 +2,7 @@ import { useState, useEffect, useMemo } from "react";
 import apiService from "../services/api";
 import { useEnergy } from "../hooks/useEnergy";
 import { EnergyChart } from "../components/EnergyChart";
+import { parseLocalDateTime } from "../lib/utils";
 import {
   Card,
   CardContent,
@@ -60,7 +61,8 @@ export function EnergyReportsPage() {
   };
 
   const formatPeriod = (period: string) => {
-    const date = new Date(period);
+    const date = parseLocalDateTime(period);
+    if (!date) return period;
     switch (selectedRange) {
       case "hour":
         return date.toLocaleString("en-US", {

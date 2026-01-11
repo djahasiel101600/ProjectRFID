@@ -45,7 +45,7 @@ class EnergyLogAdmin(admin.ModelAdmin):
     list_display = ['classroom', 'watts', 'timestamp']
     list_filter = ['classroom']
     date_hierarchy = 'timestamp'
-    readonly_fields = ['created_at']
+    readonly_fields = ['timestamp']  # timestamp is auto_now_add
 
 
 @admin.register(EnergyAggregation)

@@ -1,6 +1,7 @@
 import { useState, useEffect, useMemo } from "react";
 import apiService from "../services/api";
 import { useAttendance } from "../hooks/useAttendance";
+import { parseLocalDateTime } from "../lib/utils";
 import {
   Card,
   CardContent,
@@ -79,7 +80,9 @@ export function AttendanceReportsPage() {
 
   const formatTime = (dateString: string | null) => {
     if (!dateString) return "-";
-    return new Date(dateString).toLocaleTimeString("en-US", {
+    const date = parseLocalDateTime(dateString);
+    if (!date) return "-";
+    return date.toLocaleTimeString("en-US", {
       hour: "2-digit",
       minute: "2-digit",
     });

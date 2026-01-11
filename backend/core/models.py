@@ -77,7 +77,7 @@ class AttendanceSession(models.Model):
     classroom = models.ForeignKey(Classroom, on_delete=models.CASCADE, related_name='attendance_sessions')
     schedule = models.ForeignKey(Schedule, on_delete=models.SET_NULL, null=True, blank=True, related_name='attendance_sessions')
     date = models.DateField()
-    time_in = models.DateTimeField()
+    time_in = models.DateTimeField(auto_now_add=True) #Adjusted to remove timezone conflicts
     time_out = models.DateTimeField(null=True, blank=True)
     expected_out = models.DateTimeField(null=True, blank=True)
     status = models.CharField(max_length=10, choices=STATUS_CHOICES, default='IN')
@@ -96,8 +96,8 @@ class EnergyLog(models.Model):
     """Records power consumption readings from ESP32 devices."""
     classroom = models.ForeignKey(Classroom, on_delete=models.CASCADE, related_name='energy_logs')
     watts = models.DecimalField(max_digits=10, decimal_places=2)
-    timestamp = models.DateTimeField()
-    created_at = models.DateTimeField(auto_now_add=True)
+    timestamp = models.DateTimeField(auto_now_add=True)  # Auto-set to server time when created
+    # Remove created_at since timestamp now serves the same purpose
     
     class Meta:
         db_table = 'energy_logs'

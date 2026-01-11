@@ -43,6 +43,7 @@ INSTALLED_APPS = [
     'rest_framework_simplejwt',
     'rest_framework_simplejwt.token_blacklist',
     "corsheaders",
+    'django_celery_beat',  # Celery Beat for periodic tasks
     'core',
 ]
 
@@ -123,13 +124,18 @@ TIME_ZONE = 'Asia/Manila'
 
 USE_I18N = True
 
-USE_TZ = True
+# Disable timezone-aware datetimes - all times will be in local timezone (Asia/Manila)
+USE_TZ = False
 
 
 # Static files (CSS, JavaScript, Images)
 # https://docs.djangoproject.com/en/6.0/howto/static-files/
 
 STATIC_URL = 'static/'
+STATIC_ROOT = BASE_DIR / 'staticfiles'
+STATICFILES_DIRS = [
+    BASE_DIR / 'static',
+]
 
 # Default primary key field type
 # https://docs.djangoproject.com/en/6.0/ref/settings/#default-auto-field
@@ -149,6 +155,10 @@ REST_FRAMEWORK = {
     ],
     'DEFAULT_PAGINATION_CLASS': 'rest_framework.pagination.PageNumberPagination',
     'PAGE_SIZE': 50,
+    # Datetime format settings for proper timezone handling
+    # Output format includes timezone offset (e.g., 2026-01-11T08:30:00+08:00)
+    'DATETIME_FORMAT': '%Y-%m-%dT%H:%M:%S%z',
+    'DATETIME_INPUT_FORMATS': ['%Y-%m-%dT%H:%M:%S%z', '%Y-%m-%dT%H:%M:%S.%f%z', 'iso-8601'],
 }
 
 # JWT Configuration
@@ -167,19 +177,12 @@ ASGI_APPLICATION = 'backend.asgi.application'
 
 CHANNEL_LAYERS = {
     'default': {
-        'BACKEND': 'channels.layers.InMemoryChannelLayer',
+        'BACKEND': 'channels_redis.core.RedisChannelLayer',
+        'CONFIG': {
+            'hosts': [('127.0.0.1', 6379)],
+        },
     },
 }
-
-# For production, use Redis:
-# CHANNEL_LAYERS = {
-#     'default': {
-#         'BACKEND': 'channels_redis.core.RedisChannelLayer',
-#         'CONFIG': {
-#             'hosts': [('127.0.0.1', 6379)],
-#         },
-#     },
-# }
 
 # CORS Configuration
 CORS_ALLOWED_ORIGINS = [
@@ -194,3 +197,37 @@ CORS_ALLOW_CREDENTIALS = True
 
 # For development, allow all origins (not for production)
 # CORS_ALLOW_ALL_ORIGINS = True
+
+# ============== CELERY CONFIGURATION ==============
+# Broker URL - Redis is recommended for production
+# For development without Redis, use the database as broker
+CELERY_BROKER_URL = 'redis://localhost:6379/0'  # Redis broker
+# Alternative: Use database as broker (slower, but no Redis required)
+# CELERY_BROKER_URL = 'sqla+sqlite:///celerydb.sqlite'
+
+CELERY_RESULT_BACKEND = 'redis://localhost:6379/0'
+# Alternative for database backend:
+# CELERY_RESULT_BACKEND = 'django-db'
+
+CELERY_ACCEPT_CONTENT = ['json']
+CELERY_TASK_SERIALIZER = 'json'
+CELERY_RESULT_SERIALIZER = 'json'
+CELERY_TIMEZONE = TIME_ZONE  # Use the same timezone as Django
+CELERY_ENABLE_UTC = False
+
+# Celery Beat Schedule - Periodic Tasks
+CELERY_BEAT_SCHEDULE = {
+    'auto-timeout-attendance-sessions': {
+        'task': 'core.tasks.auto_timeout_sessions',
+        'schedule': 30.0,  # Run every 30 seconds
+    },
+    # Optional: Daily cleanup task (runs at midnight)
+    # 'cleanup-old-sessions': {
+    #     'task': 'core.tasks.cleanup_old_sessions',
+    #     'schedule': crontab(hour=0, minute=0),
+    #     'kwargs': {'days': 90},
+    # },
+}
+
+# Use django-celery-beat for dynamic task scheduling via Django Admin
+CELERY_BEAT_SCHEDULER = 'django_celery_beat.schedulers:DatabaseScheduler'
