@@ -120,12 +120,13 @@ AUTH_PASSWORD_VALIDATORS = [
 
 LANGUAGE_CODE = 'en-us'
 
-TIME_ZONE = 'Asia/Manila'
-
 USE_I18N = True
 
-# Disable timezone-aware datetimes - all times will be in local timezone (Asia/Manila)
-USE_TZ = False
+# Timezone settings
+TIME_ZONE = 'Asia/Manila'  # Change to your timezone
+USE_TZ = True  # Enable timezone support
+CELERY_TIMEZONE = TIME_ZONE
+CELERY_ENABLE_UTC = False  # Disable UTC, use local timezone
 
 
 # Static files (CSS, JavaScript, Images)

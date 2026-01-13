@@ -1,27 +1,24 @@
-"""
-Celery configuration for the attendance system.
-
-This sets up Celery with Django and configures periodic tasks
-for auto-timeout functionality.
-"""
-
+from __future__ import absolute_import, unicode_literals
 import os
 from celery import Celery
+from django.conf import settings
 
 # Set the default Django settings module
 os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'backend.settings')
 
-# Create the Celery app
 app = Celery('backend')
 
-# Load config from Django settings, using CELERY_ namespace
+# Using a string here means the worker doesn't have to serialize
+# the configuration object to child processes.
 app.config_from_object('django.conf:settings', namespace='CELERY')
 
-# Auto-discover tasks in all installed apps
+# Load task modules from all registered Django app configs.
 app.autodiscover_tasks()
 
+# Timezone configuration
+app.conf.timezone = settings.TIME_ZONE
+app.conf.enable_utc = settings.CELERY_ENABLE_UTC
 
-@app.task(bind=True, ignore_result=True)
+@app.task(bind=True)
 def debug_task(self):
-    """Debug task to verify Celery is working."""
     print(f'Request: {self.request!r}')
