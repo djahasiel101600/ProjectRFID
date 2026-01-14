@@ -1,3 +1,4 @@
+import { memo } from "react";
 import { useDashboard, useCountdown } from "../hooks/useDashboard";
 import { RealtimePowerChart } from "../components/RealtimePowerChart";
 import {
@@ -10,7 +11,12 @@ import { Badge } from "../components/ui/badge";
 import { Button } from "../components/ui/button";
 import type { DashboardClassroom } from "../types";
 
-function ClassroomCard({ classroom }: { classroom: DashboardClassroom }) {
+// Memoized ClassroomCard - only re-renders when its props change
+const ClassroomCard = memo(function ClassroomCard({
+  classroom,
+}: {
+  classroom: DashboardClassroom;
+}) {
   const { remaining, formatted } = useCountdown(classroom.countdown_seconds);
 
   return (
@@ -72,9 +78,10 @@ function ClassroomCard({ classroom }: { classroom: DashboardClassroom }) {
       </CardContent>
     </Card>
   );
-}
+});
 
-function StatsCard({
+// Memoized StatsCard - only re-renders when its props change
+const StatsCard = memo(function StatsCard({
   title,
   value,
   subtitle,
@@ -101,7 +108,7 @@ function StatsCard({
       </CardContent>
     </Card>
   );
-}
+});
 
 export function DashboardPage() {
   const { data, isLoading, error, isConnected, powerHistory, refresh } =

@@ -16,13 +16,19 @@ export function useAttendance(filters: AttendanceFilters = {}) {
   const [isConnected, setIsConnected] = useState(false);
   const [lastUpdate, setLastUpdate] = useState<Date | null>(null);
 
+  // Track if initial load is complete to avoid loading flash on updates
+  const hasInitialLoadRef = useRef(false);
+
   // Store filters in ref to access latest value in WebSocket callback
   const filtersRef = useRef(filters);
   filtersRef.current = filters;
 
-  const fetchData = useCallback(async () => {
+  const fetchData = useCallback(async (showLoading = true) => {
     try {
-      setIsLoading(true);
+      // Only show loading spinner on initial load, not on refreshes
+      if (showLoading && !hasInitialLoadRef.current) {
+        setIsLoading(true);
+      }
       setError(null);
       const params: { date?: string; classroom?: number; status?: string } = {};
 
@@ -37,6 +43,7 @@ export function useAttendance(filters: AttendanceFilters = {}) {
       // Ensure we always set an array
       setSessions(Array.isArray(data) ? data : []);
       setLastUpdate(new Date());
+      hasInitialLoadRef.current = true;
     } catch (err) {
       console.error('Failed to fetch attendance:', err);
       setError(err instanceof Error ? err.message : 'Failed to fetch attendance data');
@@ -47,7 +54,9 @@ export function useAttendance(filters: AttendanceFilters = {}) {
   }, []);
 
   useEffect(() => {
-    fetchData();
+    // Reset initial load flag when filters change
+    hasInitialLoadRef.current = false;
+    fetchData(true);
   }, [filters.date, filters.classroom, filters.status, fetchData]);
 
   useEffect(() => {
@@ -61,12 +70,12 @@ export function useAttendance(filters: AttendanceFilters = {}) {
         case 'attendance':
           // Refresh attendance data on attendance events
           console.log('Attendance event received:', message);
-          fetchData();
+          fetchData(false);
           break;
         case 'auto_timeout':
           // Refresh on auto-timeout (session ended)
           console.log('Auto-timeout event received:', message);
-          fetchData();
+          fetchData(false);
           break;
         case 'initial_data':
           // Connection established, mark as connected
@@ -88,7 +97,7 @@ export function useAttendance(filters: AttendanceFilters = {}) {
 
   const refresh = useCallback(() => {
     wsService.requestRefresh();
-    fetchData();
+    fetchData(false);
   }, [fetchData]);
 
   // Calculate stats from sessions

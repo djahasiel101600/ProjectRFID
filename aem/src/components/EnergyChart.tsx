@@ -1,3 +1,4 @@
+import { useMemo, useCallback, memo } from "react";
 import {
   AreaChart,
   Area,
@@ -15,72 +16,83 @@ import {
 import type { EnergyReport } from "../types";
 import { parseLocalDateTime } from "../lib/utils";
 
+// Memoized CustomTooltip component - defined outside to prevent recreation on each render
+const CustomTooltip = memo(function CustomTooltip({
+  active,
+  payload,
+  label,
+}: any) {
+  if (active && payload && payload.length) {
+    return (
+      <div className="bg-white dark:bg-gray-800 p-3 border border-gray-200 dark:border-gray-700 rounded-lg shadow-lg">
+        <p className="font-medium text-gray-900 dark:text-gray-100 mb-2">
+          {label}
+        </p>
+        {payload.map((entry: any, index: number) => (
+          <p key={index} className="text-sm" style={{ color: entry.color }}>
+            {entry.name}: {entry.value}{" "}
+            {entry.dataKey.includes("Kwh") ? "kWh" : "W"}
+          </p>
+        ))}
+      </div>
+    );
+  }
+  return null;
+});
+
 interface EnergyChartProps {
   data: EnergyReport[];
   range: "hour" | "day" | "month";
   chartType?: "area" | "bar" | "composed";
 }
 
-export function EnergyChart({
+export const EnergyChart = memo(function EnergyChart({
   data,
   range,
   chartType = "composed",
 }: EnergyChartProps) {
-  // Format period label based on range
-  const formatPeriodLabel = (period: string) => {
-    const date = parseLocalDateTime(period);
-    if (!date) return period;
-    switch (range) {
-      case "hour":
-        return date.toLocaleString("en-US", {
-          hour: "2-digit",
-          minute: "2-digit",
-        });
-      case "day":
-        return date.toLocaleDateString("en-US", {
-          month: "short",
-          day: "numeric",
-        });
-      case "month":
-        return date.toLocaleDateString("en-US", {
-          month: "short",
-          year: "2-digit",
-        });
-      default:
-        return period;
-    }
-  };
+  // Memoized format period label function based on range
+  const formatPeriodLabel = useCallback(
+    (period: string) => {
+      const date = parseLocalDateTime(period);
+      if (!date) return period;
+      switch (range) {
+        case "hour":
+          return date.toLocaleString("en-US", {
+            hour: "2-digit",
+            minute: "2-digit",
+          });
+        case "day":
+          return date.toLocaleDateString("en-US", {
+            month: "short",
+            day: "numeric",
+          });
+        case "month":
+          return date.toLocaleDateString("en-US", {
+            month: "short",
+            year: "2-digit",
+          });
+        default:
+          return period;
+      }
+    },
+    [range]
+  );
 
-  // Transform data for the chart
-  const chartData = data.map((item) => ({
-    period: formatPeriodLabel(item.period),
-    fullPeriod: item.period,
-    totalKwh: Number(item.total_kwh.toFixed(4)),
-    avgWatts: Number(item.avg_watts.toFixed(1)),
-    maxWatts: Number(item.max_watts.toFixed(1)),
-    minWatts: Number(item.min_watts.toFixed(1)),
-    readings: item.reading_count,
-  }));
-
-  // Custom tooltip
-  const CustomTooltip = ({ active, payload, label }: any) => {
-    if (active && payload && payload.length) {
-      return (
-        <div className="bg-white dark:bg-gray-800 p-3 border border-gray-200 dark:border-gray-700 rounded-lg shadow-lg">
-          <p className="font-medium text-gray-900 dark:text-gray-100 mb-2">
-            {label}
-          </p>
-          {payload.map((entry: any, index: number) => (
-            <p key={index} className="text-sm" style={{ color: entry.color }}>
-              {entry.name}: {entry.value}{" "}
-              {entry.dataKey.includes("Kwh") ? "kWh" : "W"}
-            </p>
-          ))}
-        </div>
-      );
-    }
-    return null;
-  };
+  // Memoized chart data transformation - only recalculates when data or formatPeriodLabel changes
+  const chartData = useMemo(
+    () =>
+      data.map((item) => ({
+        period: formatPeriodLabel(item.period),
+        fullPeriod: item.period,
+        totalKwh: Number(item.total_kwh.toFixed(4)),
+        avgWatts: Number(item.avg_watts.toFixed(1)),
+        maxWatts: Number(item.max_watts.toFixed(1)),
+        minWatts: Number(item.min_watts.toFixed(1)),
+        readings: item.reading_count,
+      })),
+    [data, formatPeriodLabel]
+  );
 
   if (data.length === 0) {
     return (
@@ -254,4 +266,4 @@ export function EnergyChart({
       </ComposedChart>
     </ResponsiveContainer>
   );
-}
+});

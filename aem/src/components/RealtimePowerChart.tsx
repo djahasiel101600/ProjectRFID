@@ -1,4 +1,4 @@
-import { useMemo } from "react";
+import { useMemo, memo } from "react";
 import {
   LineChart,
   Line,
@@ -36,7 +36,41 @@ const CLASSROOM_COLORS = [
   "#84cc16", // lime
 ];
 
-export function RealtimePowerChart({
+// Memoized CustomTooltip component - defined outside to prevent recreation on each render
+const CustomTooltip = memo(function CustomTooltip({
+  active,
+  payload,
+  label,
+}: any) {
+  if (active && payload && payload.length) {
+    const total = payload.reduce(
+      (sum: number, entry: any) => sum + (entry.value || 0),
+      0
+    );
+    return (
+      <div className="bg-white dark:bg-gray-800 p-3 border border-gray-200 dark:border-gray-700 rounded-lg shadow-lg">
+        <p className="font-medium text-gray-900 dark:text-gray-100 mb-2">
+          {label}
+        </p>
+        {payload.map((entry: any, index: number) => (
+          <div key={index} className="flex justify-between gap-4 text-sm">
+            <span style={{ color: entry.color }}>{entry.name}:</span>
+            <span className="font-mono">{entry.value?.toFixed(1) || 0} W</span>
+          </div>
+        ))}
+        {payload.length > 1 && (
+          <div className="flex justify-between gap-4 text-sm font-bold border-t mt-2 pt-2">
+            <span>Total:</span>
+            <span className="font-mono">{total.toFixed(1)} W</span>
+          </div>
+        )}
+      </div>
+    );
+  }
+  return null;
+});
+
+export const RealtimePowerChart = memo(function RealtimePowerChart({
   data,
   title = "Real-Time Power Consumption",
   maxPoints = 30,
@@ -95,38 +129,6 @@ export function RealtimePowerChart({
       .filter(([key]) => key.startsWith("room_"))
       .reduce((sum, [, value]) => sum + (value as number), 0);
   }, [chartData]);
-
-  // Custom tooltip
-  const CustomTooltip = ({ active, payload, label }: any) => {
-    if (active && payload && payload.length) {
-      const total = payload.reduce(
-        (sum: number, entry: any) => sum + (entry.value || 0),
-        0
-      );
-      return (
-        <div className="bg-white dark:bg-gray-800 p-3 border border-gray-200 dark:border-gray-700 rounded-lg shadow-lg">
-          <p className="font-medium text-gray-900 dark:text-gray-100 mb-2">
-            {label}
-          </p>
-          {payload.map((entry: any, index: number) => (
-            <div key={index} className="flex justify-between gap-4 text-sm">
-              <span style={{ color: entry.color }}>{entry.name}:</span>
-              <span className="font-mono">
-                {entry.value?.toFixed(1) || 0} W
-              </span>
-            </div>
-          ))}
-          {payload.length > 1 && (
-            <div className="flex justify-between gap-4 text-sm font-bold border-t mt-2 pt-2">
-              <span>Total:</span>
-              <span className="font-mono">{total.toFixed(1)} W</span>
-            </div>
-          )}
-        </div>
-      );
-    }
-    return null;
-  };
 
   if (data.length === 0) {
     return (
@@ -187,6 +189,7 @@ export function RealtimePowerChart({
                   dot={false}
                   activeDot={{ r: 4 }}
                   connectNulls
+                  isAnimationActive={false}
                 />
               ))}
             </LineChart>
@@ -198,4 +201,4 @@ export function RealtimePowerChart({
       </CardContent>
     </Card>
   );
-}
+});

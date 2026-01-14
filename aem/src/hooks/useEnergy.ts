@@ -8,6 +8,9 @@ interface EnergyFilters {
   range?: 'hour' | 'day' | 'month';
 }
 
+// Debounce delay for power updates (ms)
+const POWER_UPDATE_DEBOUNCE = 2000;
+
 export function useEnergy(filters: EnergyFilters = {}) {
   const [reports, setReports] = useState<EnergyReport[]>([]);
   const [isLoading, setIsLoading] = useState(true);
@@ -15,13 +18,21 @@ export function useEnergy(filters: EnergyFilters = {}) {
   const [isConnected, setIsConnected] = useState(false);
   const [lastUpdate, setLastUpdate] = useState<Date | null>(null);
 
+  // Track if initial load is complete to avoid loading flash on updates
+  const hasInitialLoadRef = useRef(false);
+  // Debounce timer ref for power updates
+  const debounceTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
   // Store filters in ref to access latest value in WebSocket callback
   const filtersRef = useRef(filters);
   filtersRef.current = filters;
 
-  const fetchData = useCallback(async () => {
+  const fetchData = useCallback(async (showLoading = true) => {
     try {
-      setIsLoading(true);
+      // Only show loading spinner on initial load, not on refreshes
+      if (showLoading && !hasInitialLoadRef.current) {
+        setIsLoading(true);
+      }
       const params: { classroom?: number; range?: 'hour' | 'day' | 'month' } = {
         range: filtersRef.current.range || 'day',
       };
@@ -34,6 +45,7 @@ export function useEnergy(filters: EnergyFilters = {}) {
       setReports(data);
       setError(null);
       setLastUpdate(new Date());
+      hasInitialLoadRef.current = true;
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to fetch energy data');
     } finally {
@@ -41,8 +53,20 @@ export function useEnergy(filters: EnergyFilters = {}) {
     }
   }, []);
 
+  // Debounced fetch for power updates to prevent excessive API calls
+  const debouncedFetchData = useCallback(() => {
+    if (debounceTimerRef.current) {
+      clearTimeout(debounceTimerRef.current);
+    }
+    debounceTimerRef.current = setTimeout(() => {
+      fetchData(false);
+    }, POWER_UPDATE_DEBOUNCE);
+  }, [fetchData]);
+
   useEffect(() => {
-    fetchData();
+    // Reset initial load flag when filters change
+    hasInitialLoadRef.current = false;
+    fetchData(true);
   }, [filters.classroom, filters.range, fetchData]);
 
   useEffect(() => {
@@ -54,9 +78,9 @@ export function useEnergy(filters: EnergyFilters = {}) {
     const unsubscribe = wsService.subscribe((message: WSMessage) => {
       switch (message.type) {
         case 'power':
-          // New power reading received - refresh energy data
+          // New power reading received - debounce refresh to avoid excessive updates
           console.log('Power update received:', message);
-          fetchData();
+          debouncedFetchData();
           break;
         case 'initial_data':
           // Connection established, mark as connected
@@ -73,12 +97,16 @@ export function useEnergy(filters: EnergyFilters = {}) {
     return () => {
       unsubscribe();
       clearInterval(connectionCheck);
+      // Clear any pending debounce timer
+      if (debounceTimerRef.current) {
+        clearTimeout(debounceTimerRef.current);
+      }
     };
-  }, [filters.classroom, fetchData]);
+  }, [filters.classroom, debouncedFetchData]);
 
   const refresh = useCallback(() => {
     wsService.requestRefresh();
-    fetchData();
+    fetchData(false);
   }, [fetchData]);
 
   // Calculate totals from reports

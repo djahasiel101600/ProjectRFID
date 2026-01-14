@@ -13,10 +13,16 @@ export function useDashboard(classroomId?: number) {
   const [isConnected, setIsConnected] = useState(false);
   const [powerHistory, setPowerHistory] = useState<PowerReading[]>([]);
   const classroomNamesRef = useRef<Map<number, string>>(new Map());
+  
+  // Track if initial load is complete to avoid loading flash on updates
+  const hasInitialLoadRef = useRef(false);
 
-  const fetchData = useCallback(async () => {
+  const fetchData = useCallback(async (showLoading = true) => {
     try {
-      setIsLoading(true);
+      // Only show loading spinner on initial load, not on refreshes
+      if (showLoading && !hasInitialLoadRef.current) {
+        setIsLoading(true);
+      }
       const dashboardData = await apiService.getDashboard();
       setData(dashboardData);
       
@@ -26,6 +32,7 @@ export function useDashboard(classroomId?: number) {
       });
       
       setError(null);
+      hasInitialLoadRef.current = true;
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to fetch dashboard data');
     } finally {
@@ -34,7 +41,7 @@ export function useDashboard(classroomId?: number) {
   }, []);
 
   useEffect(() => {
-    fetchData();
+    fetchData(true);
 
     // Connect to WebSocket
     wsService.connect(classroomId);
@@ -53,7 +60,7 @@ export function useDashboard(classroomId?: number) {
         case 'attendance':
           // Refresh data on attendance events to update classroom cards
           console.log('Attendance event - refreshing dashboard data');
-          fetchData();
+          fetchData(false);
           break;
         case 'power':
           // Update power for specific classroom in real-time
@@ -88,7 +95,7 @@ export function useDashboard(classroomId?: number) {
         case 'auto_timeout':
           // Refresh data on auto-timeout
           console.log('Auto-timeout event - refreshing dashboard data');
-          fetchData();
+          fetchData(false);
           break;
       }
     });
@@ -107,7 +114,7 @@ export function useDashboard(classroomId?: number) {
 
   const refresh = () => {
     wsService.requestRefresh();
-    fetchData();
+    fetchData(false);
   };
 
   const clearPowerHistory = () => {
