@@ -11,8 +11,11 @@ export function useDashboard(classroomId?: number) {
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [isConnected, setIsConnected] = useState(false);
+  const [isReconnecting, setIsReconnecting] = useState(false);
   const [powerHistory, setPowerHistory] = useState<PowerReading[]>([]);
   const classroomNamesRef = useRef<Map<number, string>>(new Map());
+  const wasConnectedRef = useRef(false);
+  const refreshTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   
   // Track if initial load is complete to avoid loading flash on updates
   const hasInitialLoadRef = useRef(false);
@@ -40,6 +43,20 @@ export function useDashboard(classroomId?: number) {
     }
   }, []);
 
+  // Debounced refresh to avoid race conditions with database updates
+  const debouncedRefresh = useCallback((delay = 500) => {
+    // Clear any pending refresh
+    if (refreshTimerRef.current) {
+      clearTimeout(refreshTimerRef.current);
+    }
+    
+    // Schedule new refresh after delay
+    refreshTimerRef.current = setTimeout(() => {
+      fetchData(false);
+      refreshTimerRef.current = null;
+    }, delay);
+  }, [fetchData]);
+
   useEffect(() => {
     fetchData(true);
 
@@ -52,32 +69,49 @@ export function useDashboard(classroomId?: number) {
       
       switch (message.type) {
         case 'initial_data':
+          const currentlyConnected = wsService.isConnected();
+          const wasDisconnected = wasConnectedRef.current && !currentlyConnected;
+          
           setIsConnected(true);
-          if (message.data) {
+          setIsReconnecting(false);
+          
+          // If we just reconnected, refresh all data
+          if (wasDisconnected) {
+            console.log('WebSocket reconnected - refreshing all data');
+            fetchData(false);
+          } else if (message.data) {
             setData(message.data);
           }
+          
+          wasConnectedRef.current = true;
           break;
         case 'attendance':
-          // Refresh data on attendance events to update classroom cards
-          console.log('Attendance event - refreshing dashboard data');
-          fetchData(false);
+          // Refresh data on attendance events with a delay to avoid race conditions
+          // This allows the database transaction to complete before fetching
+          console.log('Attendance event - scheduling refresh with delay');
+          debouncedRefresh(500);
           break;
         case 'power':
           // Update power for specific classroom in real-time
-          console.log('Power update for classroom:', message.classroom_id, message.watts, 'W');
+          console.log('Power update for classroom:', message.classroom_id, message.watts, 'W', message.voltage, 'V', message.current, 'A');
           
-          // Add to power history for real-time chart
-          setPowerHistory(prev => {
-            const newReading: PowerReading = {
-              timestamp: message.timestamp || new Date().toISOString(),
-              watts: message.watts,
-              classroomId: message.classroom_id,
-              classroomName: classroomNamesRef.current.get(message.classroom_id) || `Room ${message.classroom_id}`,
-            };
-            const updated = [...prev, newReading];
-            // Keep only last MAX_POWER_HISTORY readings
-            return updated.slice(-MAX_POWER_HISTORY);
-          });
+          // Validate power data before adding to history
+          if (message.classroom_id && typeof message.watts === 'number') {
+            // Add to power history for real-time chart
+            setPowerHistory(prev => {
+              const newReading: PowerReading = {
+                timestamp: message.timestamp || new Date().toISOString(),
+                voltage: message.voltage ?? null,
+                current: message.current ?? null,
+                watts: message.watts,
+                classroomId: message.classroom_id,
+                classroomName: classroomNamesRef.current.get(message.classroom_id) || `Room ${message.classroom_id}`,
+              };
+              const updated = [...prev, newReading];
+              // Keep only last MAX_POWER_HISTORY readings
+              return updated.slice(-MAX_POWER_HISTORY);
+            });
+          }
           
           // Update dashboard data
           setData(prev => {
@@ -86,31 +120,57 @@ export function useDashboard(classroomId?: number) {
               ...prev,
               classrooms: prev.classrooms.map(c => 
                 c.id === message.classroom_id 
-                  ? { ...c, current_power: message.watts, last_power_update: message.timestamp }
+                  ? { 
+                      ...c, 
+                      current_voltage: message.voltage ?? null,
+                      current_current: message.current ?? null,
+                      current_power: message.watts ?? null,
+                      last_power_update: message.timestamp || new Date().toISOString()
+                    }
                   : c
               )
             };
           });
           break;
         case 'auto_timeout':
-          // Refresh data on auto-timeout
-          console.log('Auto-timeout event - refreshing dashboard data');
-          fetchData(false);
+          // Refresh data on auto-timeout with a delay
+          console.log('Auto-timeout event - scheduling refresh with delay');
+          debouncedRefresh(500);
           break;
       }
     });
 
     // Check connection status periodically
     const connectionCheck = setInterval(() => {
-      setIsConnected(wsService.isConnected());
-    }, 5000);
+      const connected = wsService.isConnected();
+      const wasConnected = wasConnectedRef.current;
+      
+      setIsConnected(connected);
+      
+      // Detect disconnection
+      if (wasConnected && !connected) {
+        console.log('WebSocket disconnected - entering reconnecting state');
+        setIsReconnecting(true);
+        wasConnectedRef.current = false;
+      }
+      // Detect reconnection
+      else if (!wasConnected && connected) {
+        console.log('WebSocket reconnected - refreshing data');
+        setIsReconnecting(false);
+        wasConnectedRef.current = true;
+        fetchData(false);
+      }
+    }, 1000); // Check every second for more responsive UI
 
     return () => {
       unsubscribe();
       clearInterval(connectionCheck);
+      if (refreshTimerRef.current) {
+        clearTimeout(refreshTimerRef.current);
+      }
       wsService.disconnect();
     };
-  }, [classroomId, fetchData]);
+  }, [classroomId, fetchData, debouncedRefresh]);
 
   const refresh = () => {
     wsService.requestRefresh();
@@ -121,7 +181,7 @@ export function useDashboard(classroomId?: number) {
     setPowerHistory([]);
   };
 
-  return { data, isLoading, error, isConnected, powerHistory, refresh, clearPowerHistory };
+  return { data, isLoading, error, isConnected, isReconnecting, powerHistory, refresh, clearPowerHistory };
 }
 
 export function useCountdown(targetSeconds: number | null) {

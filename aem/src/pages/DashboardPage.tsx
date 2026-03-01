@@ -1,6 +1,6 @@
 import { memo } from "react";
 import { useDashboard, useCountdown } from "../hooks/useDashboard";
-import { RealtimePowerChart } from "../components/RealtimePowerChart";
+import { RealtimeMetricsChart } from "../components/RealtimeMetricsChart";
 import {
   Card,
   CardContent,
@@ -24,8 +24,12 @@ const ClassroomCard = memo(function ClassroomCard({
       <CardHeader className="pb-2">
         <div className="flex justify-between items-start">
           <CardTitle className="text-lg">{classroom.name}</CardTitle>
-          <Badge variant={classroom.current_teacher ? "success" : "secondary"}>
-            {classroom.current_teacher ? "Occupied" : "Available"}
+          <Badge
+            variant={
+              classroom.current_teacher?.full_name ? "success" : "secondary"
+            }
+          >
+            {classroom.current_teacher?.full_name ? "Occupied" : "Available"}
           </Badge>
         </div>
       </CardHeader>
@@ -33,10 +37,10 @@ const ClassroomCard = memo(function ClassroomCard({
         {/* Current Teacher */}
         <div className="mb-4">
           <p className="text-sm text-gray-500 dark:text-gray-400">
-            Current Teacher
+            Current {classroom.current_teacher?.role || "Teacher"}
           </p>
           <p className="font-medium text-lg">
-            {classroom.current_teacher?.name || "None"}
+            {classroom.current_teacher?.full_name || "None"}
           </p>
         </div>
 
@@ -57,23 +61,56 @@ const ClassroomCard = memo(function ClassroomCard({
         )}
 
         {/* Power Usage */}
-        <div className="mt-4 pt-4 border-t">
+        <div className="mt-4 pt-4 border-t space-y-2">
+          {/* Voltage */}
           <div className="flex justify-between items-center">
             <span className="text-sm text-gray-500 dark:text-gray-400">
-              Current Power
+              Voltage
             </span>
-            <span className="font-mono text-xl font-bold text-blue-600">
-              {classroom.current_power !== null
+            <span className="font-mono text-lg font-bold text-blue-600">
+              {classroom.current_voltage !== null &&
+              classroom.current_voltage !== undefined
+                ? `${classroom.current_voltage.toFixed(1)} V`
+                : "N/A"}
+            </span>
+          </div>
+          {/* Current */}
+          <div className="flex justify-between items-center">
+            <span className="text-sm text-gray-500 dark:text-gray-400">
+              Current
+            </span>
+            <span className="font-mono text-lg font-bold text-green-600">
+              {classroom.current_current !== null &&
+              classroom.current_current !== undefined
+                ? `${classroom.current_current.toFixed(3)} A`
+                : "N/A"}
+            </span>
+          </div>
+          {/* Power */}
+          <div className="flex justify-between items-center">
+            <span className="text-sm text-gray-500 dark:text-gray-400">
+              Power
+            </span>
+            <span className="font-mono text-xl font-bold text-amber-600">
+              {classroom.current_power !== null &&
+              classroom.current_power !== undefined
                 ? `${classroom.current_power.toFixed(1)} W`
                 : "N/A"}
             </span>
           </div>
-          {classroom.last_power_update && (
-            <p className="text-xs text-gray-400 mt-1">
-              Updated:{" "}
-              {new Date(classroom.last_power_update).toLocaleTimeString()}
-            </p>
-          )}
+          {classroom.last_power_update &&
+            (() => {
+              try {
+                const date = new Date(classroom.last_power_update);
+                return !isNaN(date.getTime()) ? (
+                  <p className="text-xs text-gray-400 mt-1">
+                    Updated: {date.toLocaleTimeString()}
+                  </p>
+                ) : null;
+              } catch {
+                return null;
+              }
+            })()}
         </div>
       </CardContent>
     </Card>
@@ -111,8 +148,15 @@ const StatsCard = memo(function StatsCard({
 });
 
 export function DashboardPage() {
-  const { data, isLoading, error, isConnected, powerHistory, refresh } =
-    useDashboard();
+  const {
+    data,
+    isLoading,
+    error,
+    isConnected,
+    isReconnecting,
+    powerHistory,
+    refresh,
+  } = useDashboard();
 
   if (isLoading) {
     return (
@@ -157,11 +201,19 @@ export function DashboardPage() {
         <div className="flex items-center gap-2">
           <div
             className={`w-2 h-2 rounded-full ${
-              isConnected ? "bg-green-500" : "bg-red-500"
+              isConnected
+                ? "bg-green-500"
+                : isReconnecting
+                  ? "bg-yellow-500 animate-pulse"
+                  : "bg-red-500"
             }`}
           />
           <span className="text-sm text-gray-500">
-            {isConnected ? "Live" : "Disconnected"}
+            {isConnected
+              ? "Live"
+              : isReconnecting
+                ? "Reconnecting..."
+                : "Disconnected"}
           </span>
           <Button variant="outline" size="sm" onClick={refresh}>
             Refresh
@@ -191,12 +243,24 @@ export function DashboardPage() {
         />
       </div>
 
-      {/* Real-Time Power Chart */}
-      <RealtimePowerChart
-        data={powerHistory}
-        title="Real-Time Power Consumption"
-        maxPoints={30}
-      />
+      {/* Real-Time Metrics Charts */}
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
+        <RealtimeMetricsChart
+          data={powerHistory}
+          metric="voltage"
+          maxPoints={30}
+        />
+        <RealtimeMetricsChart
+          data={powerHistory}
+          metric="current"
+          maxPoints={30}
+        />
+        <RealtimeMetricsChart
+          data={powerHistory}
+          metric="power"
+          maxPoints={30}
+        />
+      </div>
 
       {/* Classroom Grid */}
       <div>

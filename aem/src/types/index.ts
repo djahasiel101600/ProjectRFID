@@ -48,7 +48,7 @@ export interface AttendanceSession {
   time_in: string;
   time_out: string | null;
   expected_out: string | null;
-  status: 'IN' | 'AUTO_OUT' | 'INVALID';
+  status: 'IN' | 'MANUAL_OUT' | 'AUTO_OUT' | 'INVALID';
   status_display: string;
   rfid_uid_used: string;
   created_at: string;
@@ -58,6 +58,8 @@ export interface EnergyLog {
   id: number;
   classroom: number;
   classroom_name: string;
+  voltage: number | null;
+  current: number | null;
   watts: number;
   timestamp: string;
   created_at: string;
@@ -72,12 +74,26 @@ export interface EnergyReport {
   reading_count: number;
 }
 
+export interface Teacher {
+  id: number,
+  username: string,
+  email: string,
+  first_name: string,
+  last_name: string,
+  full_name: string,
+  role: string,
+  rfid_uid: string,
+  is_active: boolean
+}
+
 export interface DashboardClassroom {
   id: number;
   name: string;
-  current_teacher: { id: number; name: string } | null;
+  current_teacher: Teacher | null;
   time_in: string | null;
   countdown_seconds: number | null;
+  current_voltage: number | null;
+  current_current: number | null;
   current_power: number | null;
   last_power_update: string | null;
 }
@@ -131,6 +147,8 @@ export interface WSAttendanceEvent {
 export interface WSPowerEvent {
   type: 'power';
   classroom_id: number;
+  voltage: number | null;
+  current: number | null;
   watts: number;
   timestamp: string;
 }
@@ -153,3 +171,48 @@ export interface WSInitialDataEvent {
 }
 
 export type WSMessage = WSAttendanceEvent | WSPowerEvent | WSAutoTimeoutEvent | WSInitialDataEvent;
+
+// Teacher Energy Usage Types
+export interface TeacherEnergyUsage {
+  id: number;
+  teacher: number;
+  teacher_name: string;
+  classroom: number;
+  classroom_name: string;
+  attendance_session: number;
+  start_time: string;
+  end_time: string;
+  duration_minutes: number;
+  avg_watts: number;
+  max_watts: number;
+  min_watts: number;
+  total_kwh: number;
+  reading_count: number;
+  created_at: string;
+}
+
+export interface TeacherEnergySummary {
+  teacher_id: number;
+  teacher_name: string;
+  total_kwh: number;
+  total_hours: number;
+  avg_watts: number;
+  session_count: number;
+}
+
+export interface TeacherEnergyByClassroom {
+  classroom_id: number;
+  classroom_name: string;
+  total_kwh: number;
+  total_hours: number;
+  avg_watts: number;
+  session_count: number;
+}
+
+export interface TeacherEnergyByDate {
+  date: string;
+  total_kwh: number;
+  total_hours: number;
+  avg_watts: number;
+  session_count: number;
+}

@@ -69,6 +69,7 @@ class AttendanceSession(models.Model):
     """Records teacher attendance sessions."""
     STATUS_CHOICES = [
         ('IN', 'Timed In'),
+        ('MANUAL_OUT', 'Manual Time Out'),
         ('AUTO_OUT', 'Auto Timed Out'),
         ('INVALID', 'Invalid'),
     ]
@@ -95,6 +96,8 @@ class AttendanceSession(models.Model):
 class EnergyLog(models.Model):
     """Records power consumption readings from ESP32 devices."""
     classroom = models.ForeignKey(Classroom, on_delete=models.CASCADE, related_name='energy_logs')
+    voltage = models.DecimalField(max_digits=6, decimal_places=2, null=True, blank=True)  # Volts (e.g., 220.50)
+    current = models.DecimalField(max_digits=8, decimal_places=4, null=True, blank=True)  # Amps (e.g., 1.2500)
     watts = models.DecimalField(max_digits=10, decimal_places=2)
     timestamp = models.DateTimeField(auto_now_add=True)  # Auto-set to server time when created
     # Remove created_at since timestamp now serves the same purpose
@@ -108,7 +111,7 @@ class EnergyLog(models.Model):
         ]
     
     def __str__(self):
-        return f"{self.classroom} - {self.watts}W @ {self.timestamp}"
+        return f"{self.classroom} - {self.watts}W ({self.voltage}V, {self.current}A) @ {self.timestamp}"
 
 
 class EnergyAggregation(models.Model):
@@ -135,3 +138,35 @@ class EnergyAggregation(models.Model):
     
     def __str__(self):
         return f"{self.classroom} - {self.period_type} - {self.period_start}"
+
+
+class TeacherEnergyUsage(models.Model):
+    """Tracks energy consumption attributed to each teacher's attendance sessions."""
+    teacher = models.ForeignKey(User, on_delete=models.CASCADE, related_name='energy_usage')
+    attendance_session = models.OneToOneField(AttendanceSession, on_delete=models.CASCADE, related_name='energy_usage')
+    classroom = models.ForeignKey(Classroom, on_delete=models.CASCADE, related_name='teacher_energy_usage')
+    
+    # Time period
+    start_time = models.DateTimeField()
+    end_time = models.DateTimeField()
+    duration_minutes = models.IntegerField()
+    
+    # Energy statistics
+    avg_watts = models.DecimalField(max_digits=10, decimal_places=2)
+    max_watts = models.DecimalField(max_digits=10, decimal_places=2)
+    min_watts = models.DecimalField(max_digits=10, decimal_places=2)
+    total_kwh = models.DecimalField(max_digits=12, decimal_places=4)
+    reading_count = models.IntegerField()
+    
+    created_at = models.DateTimeField(auto_now_add=True)
+    
+    class Meta:
+        db_table = 'teacher_energy_usage'
+        ordering = ['-start_time']
+        indexes = [
+            models.Index(fields=['teacher', 'start_time']),
+            models.Index(fields=['classroom', 'start_time']),
+        ]
+    
+    def __str__(self):
+        return f"{self.teacher} - {self.classroom} - {self.total_kwh} kWh"

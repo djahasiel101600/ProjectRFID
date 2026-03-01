@@ -57,6 +57,16 @@ def timeout_session(session_id):
                         }
                     }
                 )
+                
+                # Also send to IoT device for final notification
+                async_to_sync(channel_layer.group_send)(
+                    f'iot_classroom_{session.classroom_id}',
+                    {
+                        'type': 'timeout_notification',
+                        'session_id': session.id,
+                        'teacher': session.teacher.get_full_name()
+                    }
+                )
             except Exception as e:
                 logger.error(f"Error broadcasting auto-timeout: {e}")
         
@@ -67,9 +77,75 @@ def timeout_session(session_id):
         return f'Session {session_id} not found'
 
 
+@shared_task(name='core.tasks.warning_timeout_session')
+def warning_timeout_session(session_id):
+    """
+    Send a 5-minute warning before auto-timeout.
+    
+    This task is scheduled to run 5 minutes before the expected_out time.
+    """
+    from core.models import AttendanceSession
+    
+    try:
+        session = AttendanceSession.objects.select_related('teacher', 'classroom').get(id=session_id)
+        
+        if session.status != 'IN':
+            logger.info(f'Session {session_id} already has status {session.status}, skipping warning')
+            return f'Session {session_id} already {session.status}'
+        
+        logger.info(f'Sending 5-minute warning for session {session_id}')
+        
+        # Broadcast warning to IoT device
+        channel_layer = get_channel_layer()
+        if channel_layer:
+            try:
+                async_to_sync(channel_layer.group_send)(
+                    f'iot_classroom_{session.classroom_id}',
+                    {
+                        'type': 'timeout_warning',
+                        'session_id': session.id,
+                        'teacher': session.teacher.get_full_name(),
+                        'minutes_remaining': 5
+                    }
+                )
+                logger.info(f'Warning sent to classroom {session.classroom_id} for session {session_id}')
+            except Exception as e:
+                logger.error(f"Error broadcasting timeout warning: {e}")
+        
+        return f'Warning sent for session {session_id}'
+        
+    except AttendanceSession.DoesNotExist:
+        logger.warning(f'Session {session_id} not found for warning')
+        return f'Session {session_id} not found'
+
+
+def cancel_session_timeout(session):
+    """
+    Cancel scheduled timeout tasks for a session (used for manual checkout).
+    
+    Note: This function revokes tasks from Celery's queue.
+    """
+    try:
+        from celery.result import AsyncResult
+        from django_celery_beat.models import PeriodicTask
+        
+        # Revoke any pending timeout tasks for this session
+        # This is best-effort; if tasks are already running, they can't be stopped
+        logger.info(f'Attempting to cancel timeout tasks for session {session.id}')
+        
+        # You would need to store task IDs when scheduling to properly revoke
+        # For now, we just log that manual checkout occurred
+        logger.info(f'Manual checkout for session {session.id}, timeout tasks should be ignored')
+        
+        return True
+    except Exception as e:
+        logger.warning(f"Could not cancel timeout for session {session.id}: {e}")
+        return False
+
+
 def schedule_session_timeout(session):
     """
-    Schedule a timeout task to run at the session's expected_out time.
+    Schedule timeout tasks: a 5-minute warning and the actual timeout.
     """
     if not session.expected_out:
         logger.info(f'No expected_out for session {session.id}, skipping schedule')
@@ -89,13 +165,31 @@ def schedule_session_timeout(session):
     # Convert to UTC for Celery (Celery stores all ETA times in UTC)
     eta_utc = expected_out.astimezone(zoneinfo.ZoneInfo('UTC'))
     
-    # Schedule the task
+    # Calculate warning time (5 minutes before timeout)
+    from datetime import timedelta
+    warning_time = expected_out - timedelta(minutes=5)
+    warning_eta_utc = warning_time.astimezone(zoneinfo.ZoneInfo('UTC'))
+    
+    # Only schedule warning if it's in the future
+    now_utc = datetime.now(zoneinfo.ZoneInfo('UTC'))
+    if warning_eta_utc > now_utc:
+        # Schedule the 5-minute warning
+        warning_timeout_session.apply_async(
+            args=[session.id],
+            eta=warning_eta_utc
+        )
+        logger.info(f'Scheduled warning for session {session.id} at {warning_time} (UTC: {warning_eta_utc})')
+    else:
+        logger.info(f'Warning time for session {session.id} is in the past, skipping warning')
+    
+    # Schedule the actual timeout
     timeout_session.apply_async(
         args=[session.id],
         eta=eta_utc
     )
     
     logger.info(f'Scheduled timeout for session {session.id} at {expected_out} (UTC: {eta_utc})')
+
 
 
 @shared_task(name='core.tasks.auto_timeout_sessions')

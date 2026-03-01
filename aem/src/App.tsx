@@ -8,6 +8,7 @@ import {
   AttendanceReportsPage,
   EnergyReportsPage,
   AdminPage,
+  TeacherEnergyPage,
 } from "./pages";
 import "./App.css";
 
@@ -35,6 +36,8 @@ function AppContent() {
         return <AttendanceReportsPage />;
       case "energy":
         return <EnergyReportsPage />;
+      case "teacher-energy":
+        return <TeacherEnergyPage />;
       case "admin":
         return <AdminPage />;
       default:

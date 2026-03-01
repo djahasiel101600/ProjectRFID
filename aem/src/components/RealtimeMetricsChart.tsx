@@ -11,7 +11,7 @@ import {
 } from "recharts";
 import { Card, CardContent, CardHeader, CardTitle } from "./ui/card";
 
-export interface PowerReading {
+export interface MetricReading {
   timestamp: string;
   voltage?: number | null;
   current?: number | null;
@@ -20,8 +20,9 @@ export interface PowerReading {
   classroomName?: string;
 }
 
-interface RealtimePowerChartProps {
-  data: PowerReading[];
+interface RealtimeMetricsChartProps {
+  data: MetricReading[];
+  metric: "voltage" | "current" | "power";
   title?: string;
   maxPoints?: number;
 }
@@ -38,11 +39,36 @@ const CLASSROOM_COLORS = [
   "#84cc16", // lime
 ];
 
-// Memoized CustomTooltip component - defined outside to prevent recreation on each render
+const METRIC_CONFIG = {
+  voltage: {
+    title: "Voltage",
+    unit: "V",
+    color: "#3b82f6",
+    dataKey: "voltage",
+    decimals: 1,
+  },
+  current: {
+    title: "Current",
+    unit: "A",
+    color: "#10b981",
+    dataKey: "current",
+    decimals: 3,
+  },
+  power: {
+    title: "Power",
+    unit: "W",
+    color: "#f59e0b",
+    dataKey: "watts",
+    decimals: 1,
+  },
+};
+
+// Memoized CustomTooltip component
 const CustomTooltip = memo(function CustomTooltip({
   active,
   payload,
   label,
+  config,
 }: any) {
   if (active && payload && payload.length) {
     const total = payload.reduce(
@@ -57,13 +83,17 @@ const CustomTooltip = memo(function CustomTooltip({
         {payload.map((entry: any, index: number) => (
           <div key={index} className="flex justify-between gap-4 text-sm">
             <span style={{ color: entry.color }}>{entry.name}:</span>
-            <span className="font-mono">{entry.value?.toFixed(1) || 0} W</span>
+            <span className="font-mono">
+              {entry.value?.toFixed(config.decimals) || 0} {config.unit}
+            </span>
           </div>
         ))}
         {payload.length > 1 && (
           <div className="flex justify-between gap-4 text-sm font-bold border-t mt-2 pt-2">
             <span>Total:</span>
-            <span className="font-mono">{total.toFixed(1)} W</span>
+            <span className="font-mono">
+              {total.toFixed(config.decimals)} {config.unit}
+            </span>
           </div>
         )}
       </div>
@@ -72,11 +102,15 @@ const CustomTooltip = memo(function CustomTooltip({
   return null;
 });
 
-export const RealtimePowerChart = memo(function RealtimePowerChart({
+export const RealtimeMetricsChart = memo(function RealtimeMetricsChart({
   data,
-  title = "Real-Time Power Consumption",
+  metric,
+  title,
   maxPoints = 30,
-}: RealtimePowerChartProps) {
+}: RealtimeMetricsChartProps) {
+  const config = METRIC_CONFIG[metric];
+  const displayTitle = title || `Real-Time ${config.title}`;
+
   // Group data by classroom and prepare for multi-line chart
   const { chartData, classrooms } = useMemo(() => {
     // Get unique classrooms
@@ -114,33 +148,50 @@ export const RealtimePowerChart = memo(function RealtimePowerChart({
       }
 
       const group = timeGroups.get(timeKey)!;
-      group[`room_${reading.classroomId}`] = reading.watts;
+      const value =
+        metric === "voltage"
+          ? reading.voltage
+          : metric === "current"
+            ? reading.current
+            : reading.watts;
+
+      if (value !== null && value !== undefined) {
+        group[`room_${reading.classroomId}`] = value;
+      }
     });
 
     // Convert to array and take last N points
     const chartData = Array.from(timeGroups.values()).slice(-maxPoints);
 
     return { chartData, classrooms };
-  }, [data, maxPoints]);
+  }, [data, maxPoints, metric]);
 
-  // Calculate total current power
-  const totalPower = useMemo(() => {
+  // Calculate current total/average
+  const currentValue = useMemo(() => {
     if (chartData.length === 0) return 0;
     const lastPoint = chartData[chartData.length - 1];
-    return Object.entries(lastPoint)
+    const values = Object.entries(lastPoint)
       .filter(([key]) => key.startsWith("room_"))
-      .reduce((sum, [, value]) => sum + (value as number), 0);
-  }, [chartData]);
+      .map(([, value]) => value as number);
+
+    if (values.length === 0) return 0;
+
+    // For current, show average; for voltage and power, show total
+    if (metric === "current") {
+      return values.reduce((sum, val) => sum + val, 0) / values.length;
+    }
+    return values.reduce((sum, val) => sum + val, 0);
+  }, [chartData, metric]);
 
   if (data.length === 0) {
     return (
       <Card>
         <CardHeader>
-          <CardTitle className="text-lg">{title}</CardTitle>
+          <CardTitle className="text-lg">{displayTitle}</CardTitle>
         </CardHeader>
         <CardContent>
           <div className="flex items-center justify-center h-[200px] text-gray-400">
-            Waiting for power data...
+            Waiting for {config.title.toLowerCase()} data...
           </div>
         </CardContent>
       </Card>
@@ -151,11 +202,16 @@ export const RealtimePowerChart = memo(function RealtimePowerChart({
     <Card>
       <CardHeader className="pb-2">
         <div className="flex justify-between items-center">
-          <CardTitle className="text-lg">{title}</CardTitle>
+          <CardTitle className="text-lg">{displayTitle}</CardTitle>
           <div className="text-right">
-            <p className="text-sm text-gray-500">Total Power</p>
-            <p className="text-2xl font-bold font-mono text-blue-600">
-              {totalPower.toFixed(1)} W
+            <p className="text-sm text-gray-500">
+              {metric === "current" ? "Avg" : "Total"} {config.title}
+            </p>
+            <p
+              className="text-2xl font-bold font-mono"
+              style={{ color: config.color }}
+            >
+              {currentValue.toFixed(config.decimals)} {config.unit}
             </p>
           </div>
         </div>
@@ -175,10 +231,10 @@ export const RealtimePowerChart = memo(function RealtimePowerChart({
               />
               <YAxis
                 tick={{ fontSize: 11 }}
-                tickFormatter={(value) => `${value}W`}
-                width={50}
+                tickFormatter={(value) => `${value}${config.unit}`}
+                width={60}
               />
-              <Tooltip content={<CustomTooltip />} />
+              <Tooltip content={<CustomTooltip config={config} />} />
               <Legend />
               {classrooms.map((classroom) => (
                 <Line

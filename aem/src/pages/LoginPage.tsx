@@ -36,10 +36,10 @@ export function LoginPage() {
     <div className="min-h-screen flex items-center justify-center bg-gray-100 dark:bg-gray-900 px-4">
       <Card className="w-full max-w-md">
         <CardHeader className="text-center">
-          <CardTitle className="text-2xl font-bold">
-            Attendance & Energy Tracker
-          </CardTitle>
-          <CardDescription>Sign in to access the dashboard</CardDescription>
+          <CardTitle className="text-2xl font-bold">PowerAudit</CardTitle>
+          <CardDescription>
+            RFID-Enabled Smart Switches for Accountable Energy Use
+          </CardDescription>
         </CardHeader>
         <CardContent>
           <form onSubmit={handleSubmit} className="space-y-4">

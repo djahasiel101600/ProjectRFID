@@ -59,13 +59,87 @@ class IoTConsumer(AsyncWebsocketConsumer):
         )
         print(f"ESP32 device disconnected from classroom {self.classroom_id}")
     
+    async def start_scan_command(self, event):
+        """Send scan command to ESP32 device."""
+        print(f"[IoT] Sending start_scan command to ESP32 classroom {self.classroom_id}")
+        await self.send(text_data=json.dumps({
+            'type': 'start_scan',
+            'classroom_id': event.get('classroom_id')
+        }))
+    
+    async def timeout_warning(self, event):
+        """Send 5-minute warning to ESP32 device."""
+        print(f"[IoT] Sending timeout warning to ESP32 classroom {self.classroom_id}")
+        await self.send(text_data=json.dumps({
+            'type': 'timeout_warning',
+            'session_id': event.get('session_id'),
+            'teacher': event.get('teacher'),
+            'minutes_remaining': event.get('minutes_remaining', 5)
+        }))
+    
+    async def timeout_notification(self, event):
+        """Send final timeout notification to ESP32 device."""
+        print(f"[IoT] Sending timeout notification to ESP32 classroom {self.classroom_id}")
+        await self.send(text_data=json.dumps({
+            'type': 'timeout_final',
+            'session_id': event.get('session_id'),
+            'teacher': event.get('teacher')
+        }))
+    
     async def receive(self, text_data):
         """Handle incoming data from ESP32 devices."""
         try:
             data = json.loads(text_data)
+            print(f"[IoT] Raw data received: {data}")  # DEBUG
+            
+            msg_type = data.get('type')
+            
+            # Handle scan mode messages
+            if msg_type == 'scan_result':
+                rfid_uid = data.get('rfid_uid')
+                print(f"[IoT] Scan result received: {rfid_uid}")
+                
+                # Broadcast to admin channel
+                await self.channel_layer.group_send(
+                    'admin_rfid_scan',
+                    {
+                        'type': 'rfid_scan_result',
+                        'rfid_uid': rfid_uid,
+                        'classroom_id': self.classroom_id
+                    }
+                )
+                
+                await self.send(text_data=json.dumps({
+                    'status': 'ok',
+                    'message': 'Scan result received'
+                }))
+                return
+                
+            elif msg_type == 'scan_timeout':
+                print(f"[IoT] Scan timeout for classroom {self.classroom_id}")
+                
+                # Broadcast timeout to admin channel
+                await self.channel_layer.group_send(
+                    'admin_rfid_scan',
+                    {
+                        'type': 'rfid_scan_timeout',
+                        'classroom_id': self.classroom_id
+                    }
+                )
+                
+                await self.send(text_data=json.dumps({
+                    'status': 'ok',
+                    'message': 'Scan timeout acknowledged'
+                }))
+                return
+            
+            # Normal processing for attendance/power data
             device_id = data.get('device_id')
             rfid_uid = data.get('rfid_uid')
             power = data.get('power')
+            voltage = data.get('voltage')
+            current = data.get('current')
+            print(f"[IoT] Extracted - power: {power}, voltage: {voltage}, current: {current}")  # DEBUG
             timestamp_str = data.get('timestamp')
             
             # Parse timestamp from ESP32 or use server time
@@ -93,8 +167,13 @@ class IoTConsumer(AsyncWebsocketConsumer):
             # Process RFID if present (server time is used internally)
             if rfid_uid:
                 result = await self.process_rfid(rfid_uid)
-                
-                # Broadcast attendance event to dashboard
+                                # Send response back to ESP32
+                await self.send(text_data=json.dumps({
+                    'event': result['event'],
+                    'data': result['data']
+                }))
+                print(f"[IoT] Sent response to ESP32: {result['event']}")
+                                # Broadcast attendance event to dashboard
                 print(f"[IoT] Broadcasting attendance event to dashboard_classroom_{self.classroom_id}")
                 await self.channel_layer.group_send(
                     f'dashboard_classroom_{self.classroom_id}',
@@ -108,15 +187,17 @@ class IoTConsumer(AsyncWebsocketConsumer):
             
             # Process power reading if present
             if power is not None:
-                energy_log = await self.save_energy_log(power)
+                energy_log = await self.save_energy_log(power, voltage, current)
                 
                 # Broadcast power update to dashboard (use the auto-generated timestamp)
-                print(f"[IoT] Broadcasting power update to dashboard_classroom_{self.classroom_id}: {power}W")
+                print(f"[IoT] Broadcasting power update to dashboard_classroom_{self.classroom_id}: {power}W ({voltage}V, {current}A)")
                 await self.channel_layer.group_send(
                     f'dashboard_classroom_{self.classroom_id}',
                     {
                         'type': 'power_update',
                         'classroom_id': self.classroom_id,
+                        'voltage': voltage,
+                        'current': current,
                         'watts': power,
                         'timestamp': energy_log.timestamp.isoformat() if energy_log else timezone.now().isoformat()
                     }
@@ -203,13 +284,34 @@ class IoTConsumer(AsyncWebsocketConsumer):
             ).first()
             
             if existing_session:
-                print(f"[RFID DEBUG] DUPLICATE: Already has active session (ID: {existing_session.id})")
+                # Teacher is checking out manually
+                print(f"[RFID DEBUG] MANUAL CHECK-OUT: Teacher checking out from session (ID: {existing_session.id})")
+                existing_session.time_out = now
+                existing_session.status = 'MANUAL_OUT'
+                existing_session.save()
+                
+                # Cancel scheduled auto-timeout if any
+                try:
+                    from core.tasks import cancel_session_timeout
+                    cancel_session_timeout(existing_session)
+                except Exception as e:
+                    print(f"[RFID] Warning: Could not cancel timeout task: {e}")
+                
+                print(f"[RFID DEBUG] Session updated - time_out: {existing_session.time_out}, status: MANUAL_OUT")
+                print(f"{'='*60}\n")
+                
                 return {
-                    'event': 'attendance_duplicate',
+                    'event': 'attendance_out',
                     'data': {
+                        'session_id': existing_session.id,
                         'teacher': teacher.get_full_name(),
+                        'teacher_id': teacher.id,
                         'classroom': classroom.name,
-                        'message': 'Already timed in'
+                        'classroom_id': classroom.id,
+                        'time_in': existing_session.time_in.strftime('%H:%M'),
+                        'time_out': existing_session.time_out.strftime('%H:%M'),
+                        'status': 'MANUAL_OUT',
+                        'message': 'Checked out successfully'
                     }
                 }
             
@@ -335,13 +437,15 @@ class IoTConsumer(AsyncWebsocketConsumer):
             }
     
     @database_sync_to_async
-    def save_energy_log(self, watts):
+    def save_energy_log(self, watts, voltage=None, current=None):
         """Save energy reading to database. Timestamp is auto-set by the model."""
         from core.models import Classroom, EnergyLog
         
         classroom = Classroom.objects.get(id=self.classroom_id)
         energy_log = EnergyLog.objects.create(
             classroom=classroom,
+            voltage=voltage,
+            current=current,
             watts=watts
             # timestamp is auto_now_add - set automatically
         )
@@ -435,6 +539,8 @@ class DashboardConsumer(AsyncWebsocketConsumer):
         await self.send(text_data=json.dumps({
             'type': 'power',
             'classroom_id': event.get('classroom_id'),
+            'voltage': event.get('voltage'),
+            'current': event.get('current'),
             'watts': event['watts'],
             'timestamp': event['timestamp']
         }))
@@ -489,10 +595,19 @@ class DashboardConsumer(AsyncWebsocketConsumer):
                 'name': classroom.name,
                 'current_teacher': {
                     'id': current_session.teacher.id,
-                    'name': current_session.teacher.get_full_name()
+                    'username': current_session.teacher.username,
+                    'email': current_session.teacher.email,
+                    'first_name': current_session.teacher.first_name,
+                    'last_name': current_session.teacher.last_name,
+                    'full_name': current_session.teacher.get_full_name(),
+                    'role': current_session.teacher.role,
+                    'rfid_uid': current_session.teacher.rfid_uid,
+                    'is_active': current_session.teacher.is_active
                 } if current_session else None,
                 'time_in': current_session.time_in.isoformat() if current_session else None,
                 'countdown_seconds': countdown,
+                'current_voltage': float(latest_energy.voltage) if latest_energy and latest_energy.voltage else None,
+                'current_current': float(latest_energy.current) if latest_energy and latest_energy.current else None,
                 'current_power': float(latest_energy.watts) if latest_energy else None,
                 'last_power_update': latest_energy.timestamp.isoformat() if latest_energy else None
             })
@@ -510,3 +625,82 @@ class DashboardConsumer(AsyncWebsocketConsumer):
                 'invalid': today_sessions.filter(status='INVALID').count()
             }
         }
+
+
+class AdminConsumer(AsyncWebsocketConsumer):
+    """WebSocket consumer for admin RFID scanning."""
+    
+    async def connect(self):
+        self.room_group_name = 'admin_rfid_scan'
+        
+        print(f"[Admin] Connecting to admin RFID scan group")
+        
+        # Join admin scan group
+        if self.channel_layer is not None:
+            await self.channel_layer.group_add(
+                self.room_group_name,
+                self.channel_name
+            )
+        
+        await self.accept()
+        print("[Admin] Admin RFID scan connection accepted")
+    
+    async def disconnect(self, close_code):
+        if self.channel_layer is not None:
+            await self.channel_layer.group_discard(
+                self.room_group_name,
+                self.channel_name
+            )
+        print(f"[Admin] Admin disconnected from RFID scan group")
+    
+    async def receive(self, text_data):
+        """Handle incoming messages from admin frontend."""
+        try:
+            data = json.loads(text_data)
+            action = data.get('action')
+            
+            if action == 'start_scan':
+                classroom_id = data.get('classroom_id')
+                print(f"[Admin] Start scan request for classroom {classroom_id}")
+                
+                # Send start_scan command to ESP32 device
+                if classroom_id and self.channel_layer:
+                    await self.channel_layer.group_send(
+                        f'iot_classroom_{classroom_id}',
+                        {
+                            'type': 'start_scan_command',
+                            'classroom_id': classroom_id
+                        }
+                    )
+                    
+                    await self.send(text_data=json.dumps({
+                        'status': 'ok',
+                        'message': 'Scan command sent to device'
+                    }))
+                else:
+                    await self.send(text_data=json.dumps({
+                        'status': 'error',
+                        'message': 'Invalid classroom_id'
+                    }))
+        except json.JSONDecodeError:
+            await self.send(text_data=json.dumps({
+                'status': 'error',
+                'message': 'Invalid JSON'
+            }))
+    
+    async def rfid_scan_result(self, event):
+        """Handle RFID scan result from ESP32."""
+        print(f"[Admin] Received scan result: {event.get('rfid_uid')}")
+        await self.send(text_data=json.dumps({
+            'type': 'scan_result',
+            'rfid_uid': event['rfid_uid'],
+            'classroom_id': event.get('classroom_id')
+        }))
+    
+    async def rfid_scan_timeout(self, event):
+        """Handle RFID scan timeout from ESP32."""
+        print(f"[Admin] Scan timeout for classroom {event.get('classroom_id')}")
+        await self.send(text_data=json.dumps({
+            'type': 'scan_timeout',
+            'classroom_id': event.get('classroom_id')
+        }))

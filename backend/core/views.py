@@ -8,11 +8,12 @@ from django.utils import timezone
 from django.db.models import Sum, Avg, Max, Min, Count
 from django.db.models.functions import TruncDate, TruncHour, TruncDay, TruncMonth
 from datetime import datetime, timedelta
-from .models import Classroom, Schedule, AttendanceSession, EnergyLog, EnergyAggregation
+from .models import Classroom, Schedule, AttendanceSession, EnergyLog, EnergyAggregation, TeacherEnergyUsage
 from .serializers import (
     UserSerializer, UserCreateSerializer, ClassroomSerializer, ClassroomCreateSerializer,
     ScheduleSerializer, AttendanceSessionSerializer, EnergyLogSerializer,
-    EnergyAggregationSerializer, LoginSerializer, AttendanceReportSerializer, EnergyReportSerializer
+    EnergyAggregationSerializer, LoginSerializer, AttendanceReportSerializer, EnergyReportSerializer,
+    TeacherEnergyUsageSerializer, TeacherEnergySummarySerializer
 )
 
 User = get_user_model()
@@ -384,20 +385,180 @@ class DashboardView(APIView):
                 'current_teacher': UserSerializer(current_session.teacher).data if current_session else None,
                 'time_in': current_session.time_in.isoformat() if current_session else None,
                 'countdown_seconds': countdown,
+                'current_voltage': float(latest_energy.voltage) if latest_energy and latest_energy.voltage else None,
+                'current_current': float(latest_energy.current) if latest_energy and latest_energy.current else None,
                 'current_power': float(latest_energy.watts) if latest_energy else None,
                 'last_power_update': latest_energy.timestamp.isoformat() if latest_energy else None
             })
         
         return Response({
             'classrooms': classroom_data,
-            'today_stats': {
-                'total_sessions': today_sessions.count(),
-                'active_sessions': active_sessions.count(),
-                'completed_sessions': today_sessions.filter(status='AUTO_OUT').count(),
-                'invalid_sessions': today_sessions.filter(status='INVALID').count()
+            'stats': {
+                'total_today': today_sessions.count(),
+                'active': active_sessions.count(),
+                'completed': today_sessions.filter(status='AUTO_OUT').count(),
+                'invalid': today_sessions.filter(status='INVALID').count()
             }
         })
 
 
 # Import models for Q object usage
 from django.db import models
+
+
+class TeacherEnergyViewSet(viewsets.ReadOnlyModelViewSet):
+    """ViewSet for viewing teacher energy usage."""
+    queryset = TeacherEnergyUsage.objects.select_related('teacher', 'classroom', 'attendance_session').all()
+    serializer_class = TeacherEnergyUsageSerializer
+    permission_classes = [permissions.IsAuthenticated]
+    
+    def get_queryset(self):
+        queryset = TeacherEnergyUsage.objects.select_related(
+            'teacher', 'classroom', 'attendance_session'
+        ).all()
+        
+        teacher_id = self.request.query_params.get('teacher')
+        if teacher_id:
+            queryset = queryset.filter(teacher_id=teacher_id)
+        
+        classroom_id = self.request.query_params.get('classroom')
+        if classroom_id:
+            queryset = queryset.filter(classroom_id=classroom_id)
+        
+        start_date = self.request.query_params.get('start')
+        if start_date:
+            queryset = queryset.filter(start_time__gte=start_date)
+        
+        end_date = self.request.query_params.get('end')
+        if end_date:
+            queryset = queryset.filter(end_time__lte=end_date)
+        
+        return queryset
+    
+    @action(detail=False, methods=['get'])
+    def summary(self, request):
+        """Get energy summary grouped by teacher."""
+        queryset = self.get_queryset()
+        
+        summary = queryset.values(
+            'teacher', 'teacher__first_name', 'teacher__last_name', 'teacher__username'
+        ).annotate(
+            total_kwh=Sum('total_kwh'),
+            total_minutes=Sum('duration_minutes'),
+            avg_watts=Avg('avg_watts'),
+            session_count=Count('id')
+        ).order_by('-total_kwh')
+        
+        result = []
+        for item in summary:
+            teacher_name = f"{item['teacher__first_name']} {item['teacher__last_name']}".strip()
+            if not teacher_name:
+                teacher_name = item['teacher__username']
+            
+            result.append({
+                'teacher_id': item['teacher'],
+                'teacher_name': teacher_name,
+                'total_kwh': round(float(item['total_kwh'] or 0), 4),
+                'total_hours': round((item['total_minutes'] or 0) / 60, 2),
+                'avg_watts': round(float(item['avg_watts'] or 0), 2),
+                'session_count': item['session_count']
+            })
+        
+        return Response(result)
+    
+    @action(detail=False, methods=['get'])
+    def by_classroom(self, request):
+        """Get teacher energy usage grouped by classroom."""
+        teacher_id = request.query_params.get('teacher')
+        
+        if not teacher_id:
+            return Response({'error': 'teacher parameter required'}, status=status.HTTP_400_BAD_REQUEST)
+        
+        queryset = self.get_queryset().filter(teacher_id=teacher_id)
+        
+        breakdown = queryset.values(
+            'classroom', 'classroom__name'
+        ).annotate(
+            total_kwh=Sum('total_kwh'),
+            total_minutes=Sum('duration_minutes'),
+            avg_watts=Avg('avg_watts'),
+            session_count=Count('id')
+        ).order_by('-total_kwh')
+        
+        result = []
+        for item in breakdown:
+            result.append({
+                'classroom_id': item['classroom'],
+                'classroom_name': item['classroom__name'],
+                'total_kwh': round(float(item['total_kwh'] or 0), 4),
+                'total_hours': round((item['total_minutes'] or 0) / 60, 2),
+                'avg_watts': round(float(item['avg_watts'] or 0), 2),
+                'session_count': item['session_count']
+            })
+        
+        return Response(result)
+    
+    @action(detail=False, methods=['get'])
+    def by_date(self, request):
+        """Get teacher energy usage grouped by date."""
+        queryset = self.get_queryset()
+        
+        teacher_id = request.query_params.get('teacher')
+        if teacher_id:
+            queryset = queryset.filter(teacher_id=teacher_id)
+        
+        breakdown = queryset.annotate(
+            date=TruncDate('start_time')
+        ).values('date').annotate(
+            total_kwh=Sum('total_kwh'),
+            total_minutes=Sum('duration_minutes'),
+            avg_watts=Avg('avg_watts'),
+            session_count=Count('id')
+        ).order_by('-date')
+        
+        result = []
+        for item in breakdown:
+            result.append({
+                'date': item['date'].isoformat() if item['date'] else None,
+                'total_kwh': round(float(item['total_kwh'] or 0), 4),
+                'total_hours': round((item['total_minutes'] or 0) / 60, 2),
+                'avg_watts': round(float(item['avg_watts'] or 0), 2),
+                'session_count': item['session_count']
+            })
+        
+        return Response(result)
+    
+    @action(detail=False, methods=['post'])
+    def recalculate(self, request):
+        """
+        Recalculate energy usage for all completed sessions (admin only).
+        Processes in batches to avoid database locking issues.
+        """
+        if not request.user.role == 'admin':
+            return Response({'error': 'Admin access required'}, status=status.HTTP_403_FORBIDDEN)
+        
+        # Get optional batch parameters from request
+        batch_size = int(request.data.get('batch_size', 10))
+        delay = float(request.data.get('delay', 0.5))
+        
+        # Limit batch size for safety
+        batch_size = min(max(batch_size, 1), 50)
+        delay = min(max(delay, 0.1), 5.0)
+        
+        from core.services.energy_calculation import recalculate_all_teacher_energy
+        
+        try:
+            result = recalculate_all_teacher_energy(
+                batch_size=batch_size,
+                delay_between_batches=delay
+            )
+            
+            return Response({
+                'message': f"Processed {result['total']} sessions: {result['success']} success, {result['skipped']} skipped, {result['errors']} errors",
+                'details': result
+            })
+        except Exception as e:
+            return Response({
+                'error': f'Recalculation failed: {str(e)}',
+                'hint': 'Try again with smaller batch_size or larger delay'
+            }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)

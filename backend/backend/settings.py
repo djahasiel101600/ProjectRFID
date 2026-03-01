@@ -92,6 +92,10 @@ DATABASES = {
     'default': {
         'ENGINE': 'django.db.backends.sqlite3',
         'NAME': BASE_DIR / 'db.sqlite3',
+        'OPTIONS': {
+            # Increase timeout for database locks (in seconds)
+            'timeout': 30,
+        },
     }
 }
 
@@ -232,3 +236,4 @@ CELERY_BEAT_SCHEDULE = {
 
 # Use django-celery-beat for dynamic task scheduling via Django Admin
 CELERY_BEAT_SCHEDULER = 'django_celery_beat.schedulers:DatabaseScheduler'
+

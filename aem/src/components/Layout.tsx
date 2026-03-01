@@ -15,6 +15,7 @@ export function Layout({ children, currentPage, onNavigate }: LayoutProps) {
     { name: "Dashboard", page: "dashboard" },
     { name: "Attendance", page: "attendance" },
     { name: "Energy", page: "energy" },
+    { name: "Teacher Energy", page: "teacher-energy" },
   ];
 
   if (user?.role === "admin") {
@@ -28,10 +29,31 @@ export function Layout({ children, currentPage, onNavigate }: LayoutProps) {
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
           <div className="flex justify-between items-center h-16">
             {/* Logo */}
-            <div className="flex items-center">
-              <span className="text-xl font-bold text-blue-600">
-                AEM Tracker
-              </span>
+            <div className="flex items-center space-x-3">
+              <div className="flex items-center justify-center w-10 h-10 bg-blue-600 rounded-lg">
+                <svg
+                  xmlns="http://www.w3.org/2000/svg"
+                  className="w-6 h-6 text-white"
+                  fill="none"
+                  viewBox="0 0 24 24"
+                  stroke="currentColor"
+                  strokeWidth={2}
+                >
+                  <path
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    d="M13 10V3L4 14h7v7l9-11h-7z"
+                  />
+                </svg>
+              </div>
+              <div className="flex flex-col">
+                <span className="text-xl font-bold text-blue-600">
+                  PowerAudit
+                </span>
+                <span className="text-xs text-gray-500 dark:text-gray-400">
+                  RFID-Enabled Smart Switches for Accountable Energy Use
+                </span>
+              </div>
             </div>
 
             {/* Navigation */}

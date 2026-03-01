@@ -38,7 +38,7 @@ export function AttendanceReportsPage() {
       classroom: selectedClassroom ? parseInt(selectedClassroom) : undefined,
       status: selectedStatus || undefined,
     }),
-    [selectedDate, selectedClassroom, selectedStatus]
+    [selectedDate, selectedClassroom, selectedStatus],
   );
 
   // Use the real-time attendance hook
@@ -69,8 +69,10 @@ export function AttendanceReportsPage() {
     switch (status) {
       case "IN":
         return <Badge variant="success">Active</Badge>;
+      case "MANUAL_OUT":
+        return <Badge variant="outline">Manual Out</Badge>;
       case "AUTO_OUT":
-        return <Badge variant="default">Completed</Badge>;
+        return <Badge variant="default">Auto Out</Badge>;
       case "INVALID":
         return <Badge variant="destructive">Invalid</Badge>;
       default:
@@ -168,7 +170,8 @@ export function AttendanceReportsPage() {
               >
                 <option value="">All Statuses</option>
                 <option value="IN">Active</option>
-                <option value="AUTO_OUT">Completed</option>
+                <option value="MANUAL_OUT">Manual Out</option>
+                <option value="AUTO_OUT">Auto Out</option>
                 <option value="INVALID">Invalid</option>
               </Select>
             </div>

@@ -9,6 +9,7 @@ from django.utils import timezone
 from channels.layers import get_channel_layer
 from asgiref.sync import async_to_sync
 from core.models import AttendanceSession
+from core.services.energy_calculation import calculate_teacher_energy_for_session
 
 
 class Command(BaseCommand):
@@ -24,12 +25,19 @@ class Command(BaseCommand):
         ).select_related('teacher', 'classroom')
         
         count = 0
+        energy_count = 0
         channel_layer = get_channel_layer()
         
         for session in sessions_to_timeout:
             session.status = 'AUTO_OUT'
             session.time_out = session.expected_out
             session.save()
+            
+            # Calculate energy usage for this completed session
+            energy_usage = calculate_teacher_energy_for_session(session)
+            if energy_usage:
+                energy_count += 1
+                self.stdout.write(f'Calculated energy for {session.teacher}: {energy_usage.total_kwh} kWh')
             
             # Broadcast auto-timeout event
             if channel_layer:
@@ -43,7 +51,8 @@ class Command(BaseCommand):
                             'teacher_id': session.teacher_id,
                             'classroom': session.classroom.name,
                             'classroom_id': session.classroom_id,
-                            'time_out': session.time_out.strftime('%H:%M')
+                            'time_out': session.time_out.strftime('%H:%M'),
+                            'energy_kwh': float(energy_usage.total_kwh) if energy_usage else None
                         }
                     }
                 )
@@ -51,4 +60,6 @@ class Command(BaseCommand):
             count += 1
             self.stdout.write(f'Auto-timed out: {session.teacher} from {session.classroom}')
         
-        self.stdout.write(self.style.SUCCESS(f'Successfully processed {count} attendance sessions'))
+        self.stdout.write(self.style.SUCCESS(
+            f'Successfully processed {count} attendance sessions, calculated energy for {energy_count}'
+        ))

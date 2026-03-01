@@ -1,6 +1,6 @@
 from rest_framework import serializers
 from django.contrib.auth import get_user_model
-from .models import Classroom, Schedule, AttendanceSession, EnergyLog, EnergyAggregation
+from .models import Classroom, Schedule, AttendanceSession, EnergyLog, EnergyAggregation, TeacherEnergyUsage
 
 User = get_user_model()
 
@@ -103,7 +103,7 @@ class EnergyLogSerializer(serializers.ModelSerializer):
     
     class Meta:
         model = EnergyLog
-        fields = ['id', 'classroom', 'classroom_name', 'watts', 'timestamp', 'created_at']
+        fields = ['id', 'classroom', 'classroom_name', 'voltage', 'current', 'watts', 'timestamp', 'created_at']
         read_only_fields = ['id', 'created_at']
 
 
@@ -140,3 +140,31 @@ class EnergyReportSerializer(serializers.Serializer):
     avg_watts = serializers.DecimalField(max_digits=10, decimal_places=2)
     max_watts = serializers.DecimalField(max_digits=10, decimal_places=2)
     min_watts = serializers.DecimalField(max_digits=10, decimal_places=2)
+
+
+class TeacherEnergyUsageSerializer(serializers.ModelSerializer):
+    """Serializer for TeacherEnergyUsage model."""
+    teacher_name = serializers.SerializerMethodField()
+    classroom_name = serializers.CharField(source='classroom.name', read_only=True)
+    
+    class Meta:
+        model = TeacherEnergyUsage
+        fields = [
+            'id', 'teacher', 'teacher_name', 'classroom', 'classroom_name',
+            'attendance_session', 'start_time', 'end_time', 'duration_minutes',
+            'avg_watts', 'max_watts', 'min_watts', 'total_kwh', 'reading_count',
+            'created_at'
+        ]
+    
+    def get_teacher_name(self, obj):
+        return obj.teacher.get_full_name() or obj.teacher.username
+
+
+class TeacherEnergySummarySerializer(serializers.Serializer):
+    """Serializer for teacher energy summary."""
+    teacher_id = serializers.IntegerField()
+    teacher_name = serializers.CharField()
+    total_kwh = serializers.DecimalField(max_digits=12, decimal_places=4)
+    total_hours = serializers.DecimalField(max_digits=10, decimal_places=2)
+    avg_watts = serializers.DecimalField(max_digits=10, decimal_places=2)
+    session_count = serializers.IntegerField()

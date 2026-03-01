@@ -1,3 +1,4 @@
+/* Old Frimware But working: 2026-02-07 */
 #include <Wire.h>
 #include <time.h>
 
@@ -8,7 +9,8 @@
  * - ESP32 Development Board
  * - MFRC522 RFID Reader (SPI)
  * - I2C 16x2 LCD Display
- * - HC-SR04 Ultrasonic Sensor (temporary for power simulation)
+ * - ZMPT101B Voltage Sensor (for AC voltage measurement)
+ * - ACS724 Current Sensor (for AC current measurement)
  *
  * Wiring:
  * RFID RC522:
@@ -26,11 +28,22 @@
  *   - VCC -> 5V
  *   - GND -> GND
  *
- * Ultrasonic HC-SR04:
- *   - TRIG -> GPIO 32
- *   - ECHO -> GPIO 33
+
+ * Voltage Sensor – ZMPT101B (Analog)
+ *   - OUT  -> GPIO 34  (ADC1_CH6)
  *   - VCC  -> 5V
  *   - GND  -> GND
+ *
+ * Current Sensor – ACS724 (Analog)
+ *   - OUT  -> GPIO 35  (ADC1_CH7)
+ *   - VCC  -> 5V
+ *   - GND  -> GND
+ *
+ * Passive Buzzer
+ *    + → GPIO 25
+ *    - → GND
+
+
  */
 
 #include <Arduino.h>
@@ -40,6 +53,7 @@
 #include <SPI.h>
 #include <MFRC522.h>
 #include <LiquidCrystal_I2C.h>
+#include <ZMPT101B.h>
 
 // ============== CONFIGURATION ==============
 // WiFi Configuration
@@ -47,173 +61,281 @@ const char *WIFI_SSID = "2.4GHz-Band";
 const char *WIFI_PASSWORD = "#2.4GHz-Band_21";
 
 // WebSocket Server Configuration
-const char *WS_HOST = "192.168.1.18"; // Your Django server IP
+const char *WS_HOST = "192.168.1.7";
 const uint16_t WS_PORT = 8000;
-const char *DEVICE_TOKEN = "ESP32-H3WV263437R"; // From Django admin
-const int CLASSROOM_ID = 1;                     // Your classroom ID
+const char *DEVICE_TOKEN = "ESP32-H3WV263437R";
+const int CLASSROOM_ID = 1;
 
 // Device Configuration
 const char *DEVICE_ID = "ESP32-ROOM-01";
 
-// NTP Configuration for Philippines Time (UTC+8)
+// NTP Configuration
 const char *NTP_SERVER = "pool.ntp.org";
-const long GMT_OFFSET_SEC = 8 * 3600; // UTC+8 for Philippines
-const int DAYLIGHT_OFFSET_SEC = 0;    // No daylight saving in Philippines
+const long GMT_OFFSET_SEC = 8 * 3600;
+const int DAYLIGHT_OFFSET_SEC = 0;
+
+// Power Monitoring Calibration
+#define AC_FREQUENCY 60              // AC line frequency in Hz (50Hz or 60Hz)
+#define ZMPT101B_SENSITIVITY 483.50f // ZMPT101B sensitivity (calibrate with actual voltage)
+#define CURRENT_SENSITIVITY 0.040f   // ACS724: 40mV per A
+#define SAMPLES_PER_CYCLE 30         // Samples per AC cycle for accurate RMS
+#define MEASUREMENT_CYCLES 5         // Number of cycles to measure (more = more stable)
+#define NOMINAL_VOLTAGE 230.0        // Expected AC voltage (adjust for your region: 110V/220V/230V)
+#define ADC_REFERENCE_VOLTAGE 3.3f   // ESP32 ADC reference voltage
+#define ADC_RESOLUTION 4095.0f       // 12-bit ADC (0-4095)
 
 // ============== PIN DEFINITIONS ==============
-// RFID RC522 Pins
 #define RFID_SS_PIN 5
 #define RFID_RST_PIN 27
-
-// Ultrasonic Sensor Pins
-#define ULTRASONIC_TRIG 32
-#define ULTRASONIC_ECHO 33
-
-// I2C LCD Address (usually 0x27 or 0x3F)
+#define VOLTAGE_SENSOR_PIN 34 // ZMPT101B - ADC1_CH6
+#define CURRENT_SENSOR_PIN 35 // ACS724 - ADC1_CH7
 #define LCD_ADDRESS 0x27
 #define LCD_COLUMNS 16
 #define LCD_ROWS 2
 
-// ============== TIMING CONFIGURATION ==============
-#define POWER_READ_INTERVAL 60000 // Send power reading every 60 seconds
-#define RFID_READ_INTERVAL 100    // Check RFID every 100ms
-#define LCD_UPDATE_INTERVAL 1000  // Update LCD every 1 second
-#define RECONNECT_INTERVAL 5000   // Reconnect attempt every 5 seconds
-#define HEARTBEAT_INTERVAL 30000  // Send heartbeat every 30 seconds
+// Indicator pins for RFID scanning
+#define LED_RED_PIN 26   // Red LED - Scanning mode active
+#define LED_GREEN_PIN 33 // Green LED - Card detected/success
+#define BUZZER_PIN 25    // Passive buzzer - Audio feedback
+
+// Energy Conservation - Relay Control
+#define RELAY_PIN 14 // 5V Relay - Controls 230V classroom lights
+
+// ============== REAL-TIME OPTIMIZATION ==============
+// Reduced intervals for faster response
+#define POWER_READ_INTERVAL 5000 // 5 seconds (was 60 seconds)
+#define RFID_READ_INTERVAL 50    // 50ms (was 100ms)
+#define LCD_UPDATE_INTERVAL 100  // 100ms (was 1 second)
+#define HEARTBEAT_INTERVAL 30000 // 30 seconds
+#define WS_PING_INTERVAL 10000   // Ping every 10 seconds
+#define RECONNECT_INTERVAL 2000  // Reconnect every 2 seconds
+
+// Buffer sizes optimized for ESP32 memory
+#define JSON_RFID_BUFFER 192
+#define JSON_POWER_BUFFER 128
+#define JSON_HEARTBEAT_BUFFER 96
 
 // ============== GLOBAL OBJECTS ==============
 WebSocketsClient webSocket;
 MFRC522 rfid(RFID_SS_PIN, RFID_RST_PIN);
 LiquidCrystal_I2C lcd(LCD_ADDRESS, LCD_COLUMNS, LCD_ROWS);
+ZMPT101B voltageSensor(VOLTAGE_SENSOR_PIN, AC_FREQUENCY);
 
 // ============== STATE VARIABLES ==============
-bool wsConnected = false;
-bool timeSync = false; // Track if time is synced with NTP
+volatile bool wsConnected = false; // volatile for interrupt safety
+volatile bool timeSync = false;
+volatile bool rfidProcessing = false; // Prevent concurrent RFID processing
+volatile bool scanMode = false;       // RFID scan mode for admin registration
+unsigned long scanModeStartTime = 0;
+#define SCAN_MODE_TIMEOUT 30000 // 30 seconds timeout
+
 unsigned long lastPowerRead = 0;
 unsigned long lastRfidRead = 0;
 unsigned long lastLcdUpdate = 0;
 unsigned long lastReconnect = 0;
 unsigned long lastHeartbeat = 0;
+unsigned long lastWsPing = 0;
+unsigned long wsLastActivity = 0; // Track last WebSocket activity
 
+// Pre-allocated strings to reduce heap fragmentation
 String lastRfidUid = "";
+float currentVoltage = 0.0;
+float currentCurrent = 0.0;
 float currentPower = 0.0;
 String currentTeacher = "";
-String statusMessage = "Ready";
+char statusMessage[17] = "Ready"; // Fixed buffer for LCD
+
+// Current sensor calibration
+float quiescentVoltage = 2.5; // Zero-current voltage (calibrated at startup)
+
+// JSON document pools (reuse to avoid allocation)
+StaticJsonDocument<JSON_RFID_BUFFER> rfidDoc;
+StaticJsonDocument<JSON_POWER_BUFFER> powerDoc;
+StaticJsonDocument<JSON_HEARTBEAT_BUFFER> heartbeatDoc;
 
 // ============== FUNCTION DECLARATIONS ==============
 void setupWiFi();
 void setupWebSocket();
 void setupRFID();
 void setupLCD();
-void setupUltrasonic();
+void setupPowerMonitoring();
 void setupNTP();
-bool isTimeSynced();
+void setupIndicators();
 
 void webSocketEvent(WStype_t type, uint8_t *payload, size_t length);
-void sendRfidData(String rfidUid);
-void sendPowerData(float watts);
+void sendRfidData(const String &rfidUid);
+void sendPowerData(float voltage, float current, float watts);
 void sendHeartbeat();
+void sendWsPing();
+void checkWsConnection();
 
 String readRFID();
-float readUltrasonicPower();
+float readRMSVoltage();
+float readRMSCurrent();
+float calculatePower();
 void updateLCD();
-void displayMessage(String line1, String line2 = "");
+void displayMessage(const char *line1, const char *line2 = "");
 String formatTime();
+void processRFID();
+
+// LED and Buzzer control
+void setLED(int pin, bool state);
+void blinkLED(int pin, int times, int delayMs);
+void beep(int durationMs);
+void beepPattern(int times, int onMs, int offMs);
+
+// Relay control for lights
+void setRelay(bool state);
+void turnLightsOn();
+void turnLightsOff();
+
+// Scan mode functions
+void enterScanMode();
+void exitScanMode();
+void handleScanMode();
+void sendScanResult(const String &rfidUid);
+
+// Timeout warning functions
+void handleTimeoutWarning();
+void handleTimeoutFinal();
 
 // ============== SETUP ==============
 void setup()
 {
     Serial.begin(115200);
+    Serial2.begin(19200, SERIAL_8N1, 16, 17);
     Serial.println("\n\n=== IoT Attendance & Energy Monitor ===");
-    Serial.println("Initializing...");
+    Serial.println("Optimized for Real-Time");
 
-    // Initialize components
+    // Initialize LCD first for user feedback
     setupLCD();
     displayMessage("Initializing...", "Please wait");
 
+    // Setup components
     setupWiFi();
-    setupNTP(); // Sync time with NTP after WiFi is connected
+    setupNTP();
     setupRFID();
-    setupUltrasonic();
+    setupPowerMonitoring();
+    setupIndicators();
     setupWebSocket();
 
     displayMessage("System Ready", "Scan RFID Card");
     Serial.println("Setup complete!");
 }
 
-// ============== MAIN LOOP ==============
+// ============== MAIN LOOP (OPTIMIZED) ==============
 void loop()
 {
-    // Handle WebSocket communication
-    webSocket.loop();
-
     unsigned long currentMillis = millis();
 
-    // Check RFID
-    if (currentMillis - lastRfidRead >= RFID_READ_INTERVAL)
+    // 1. Handle WebSocket events FIRST (highest priority)
+    webSocket.loop();
+
+    // 2. Check WebSocket connection health
+    if (wsConnected)
+    {
+        checkWsConnection();
+    }
+
+    // 3. Check RFID (non-blocking, faster interval)
+    if (currentMillis - lastRfidRead >= RFID_READ_INTERVAL && !rfidProcessing)
     {
         lastRfidRead = currentMillis;
-        String rfidUid = readRFID();
 
-        if (rfidUid.length() > 0 && rfidUid != lastRfidUid)
+        // Handle scan mode separately
+        if (scanMode)
         {
-            lastRfidUid = rfidUid;
-            Serial.println("RFID Detected: " + rfidUid);
-
-            displayMessage("Card Detected!", rfidUid);
-
-            if (wsConnected)
-            {
-                sendRfidData(rfidUid);
-            }
-            else
-            {
-                displayMessage("No Connection!", "Card: " + rfidUid);
-            }
-
-            delay(2000);      // Prevent multiple reads
-            lastRfidUid = ""; // Reset for next card
+            handleScanMode();
+        }
+        else
+        {
+            processRFID();
         }
     }
 
-    // Send power reading periodically
+    // 4. Send power data periodically
     if (currentMillis - lastPowerRead >= POWER_READ_INTERVAL)
     {
         lastPowerRead = currentMillis;
-        currentPower = readUltrasonicPower();
 
-        Serial.print("Power Reading: ");
-        Serial.print(currentPower);
-        Serial.println(" W");
+        // Read voltage and current separately
+        currentVoltage = readRMSVoltage();
+        currentCurrent = readRMSCurrent();
+        currentPower = currentVoltage * currentCurrent;
+
+        Serial.printf("V: %.1fV, I: %.3fA, P: %.1fW\n", currentVoltage, currentCurrent, currentPower);
+        Serial.printf("[DEBUG] Before sending - Voltage: %.4f, Current: %.6f, Power: %.4f\n", currentVoltage, currentCurrent, currentPower);
 
         if (wsConnected)
         {
-            sendPowerData(currentPower);
+            sendPowerData(currentVoltage, currentCurrent, currentPower);
         }
     }
 
-    // Update LCD display
+    // 5. Update LCD (fast updates)
     if (currentMillis - lastLcdUpdate >= LCD_UPDATE_INTERVAL)
     {
         lastLcdUpdate = currentMillis;
         updateLCD();
     }
 
-    // Send heartbeat
-    if (wsConnected && currentMillis - lastHeartbeat >= HEARTBEAT_INTERVAL)
+    // 6. Send heartbeat and ping
+    if (wsConnected)
     {
-        lastHeartbeat = currentMillis;
-        sendHeartbeat();
+        if (currentMillis - lastHeartbeat >= HEARTBEAT_INTERVAL)
+        {
+            lastHeartbeat = currentMillis;
+            sendHeartbeat();
+        }
+
+        // Send WebSocket ping to keep connection alive
+        if (currentMillis - lastWsPing >= WS_PING_INTERVAL)
+        {
+            lastWsPing = currentMillis;
+            sendWsPing();
+        }
     }
 
-    // Attempt reconnection if disconnected
+    // 7. Handle reconnection
     if (!wsConnected && currentMillis - lastReconnect >= RECONNECT_INTERVAL)
     {
         lastReconnect = currentMillis;
-        Serial.println("Attempting to reconnect WebSocket...");
+        Serial.println("Reconnecting WebSocket...");
         webSocket.disconnect();
+        delay(10);
         setupWebSocket();
     }
+}
+
+// ============== RFID PROCESSING (OPTIMIZED) ==============
+void processRFID()
+{
+    rfidProcessing = true;
+
+    String rfidUid = readRFID();
+
+    if (rfidUid.length() > 0 && rfidUid != lastRfidUid)
+    {
+        lastRfidUid = rfidUid;
+        Serial.printf("RFID: %s\n", rfidUid.c_str());
+
+        displayMessage("Card Detected!", rfidUid.c_str());
+
+        if (wsConnected)
+        {
+            sendRfidData(rfidUid);
+        }
+        else
+        {
+            displayMessage("No Connection!", rfidUid.c_str());
+        }
+
+        // Short debounce delay
+        delay(100);
+        lastRfidUid = "";
+    }
+
+    rfidProcessing = false;
 }
 
 // ============== WIFI SETUP ==============
@@ -224,133 +346,194 @@ void setupWiFi()
 
     displayMessage("Connecting WiFi", WIFI_SSID);
 
+    // Disable WiFi power save for faster response
+    WiFi.setSleep(false);
+
     WiFi.mode(WIFI_STA);
     WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
 
+    // Faster connection attempt
     int attempts = 0;
-    while (WiFi.status() != WL_CONNECTED && attempts < 30)
+    while (WiFi.status() != WL_CONNECTED && attempts < 20)
     {
-        delay(500);
+        delay(250);
         Serial.print(".");
         attempts++;
     }
 
     if (WiFi.status() == WL_CONNECTED)
     {
-        Serial.println("\nWiFi Connected!");
-        Serial.print("IP Address: ");
-        Serial.println(WiFi.localIP());
-        displayMessage("WiFi Connected", WiFi.localIP().toString());
-        delay(1000);
+        Serial.printf("\nWiFi Connected! IP: %s\n", WiFi.localIP().toString().c_str());
+        displayMessage("WiFi Connected", WiFi.localIP().toString().c_str());
+        delay(500);
     }
     else
     {
-        Serial.println("\nWiFi Connection Failed!");
-        displayMessage("WiFi Failed!", "Check settings");
-        delay(2000);
+        Serial.println("\nWiFi Failed!");
+        displayMessage("WiFi Failed!", "Retrying...");
     }
 }
 
-// ============== WEBSOCKET SETUP ==============
+// ============== WEBSOCKET SETUP (OPTIMIZED) ==============
 void setupWebSocket()
 {
-    // Build WebSocket path with token
     String wsPath = "/ws/iot/classroom/" + String(CLASSROOM_ID) + "/?token=" + String(DEVICE_TOKEN);
 
-    Serial.print("Connecting to WebSocket: ws://");
-    Serial.print(WS_HOST);
-    Serial.print(":");
-    Serial.print(WS_PORT);
-    Serial.println(wsPath);
+    Serial.printf("WS: ws://%s:%d%s\n", WS_HOST, WS_PORT, wsPath.c_str());
 
-    // Important: Set extra headers that Django Channels expects
+    // Configure WebSocket for low latency
     webSocket.setExtraHeaders("Origin: http://192.168.1.18:8000");
-
     webSocket.begin(WS_HOST, WS_PORT, wsPath.c_str());
     webSocket.onEvent(webSocketEvent);
     webSocket.setReconnectInterval(RECONNECT_INTERVAL);
 
-    // Disable the built-in heartbeat - it can interfere with some servers
-    // webSocket.enableHeartbeat(15000, 3000, 2);
+    // Enable heartbeat with shorter intervals
+    webSocket.enableHeartbeat(15000, 3000, 2);
 }
 
 // ============== WEBSOCKET EVENT HANDLER ==============
 void webSocketEvent(WStype_t type, uint8_t *payload, size_t length)
 {
+    wsLastActivity = millis(); // Update last activity time
+
     switch (type)
     {
     case WStype_DISCONNECTED:
         Serial.println("WebSocket Disconnected!");
         wsConnected = false;
-        statusMessage = "Disconnected";
+        strcpy(statusMessage, "Disconnected");
         break;
 
     case WStype_CONNECTED:
         Serial.println("WebSocket Connected!");
         wsConnected = true;
-        statusMessage = "Connected";
-        displayMessage("WS Connected!", "Ready to scan");
-
-        // Send initial power reading
-        currentPower = readUltrasonicPower();
-        sendPowerData(currentPower);
+        strcpy(statusMessage, "Connected");
+        displayMessage("WS Connected!", "Ready");
         break;
 
     case WStype_TEXT:
     {
-        Serial.print("Received: ");
-        Serial.println((char *)payload);
-
-        // Parse JSON response
-        StaticJsonDocument<512> doc;
-        DeserializationError error = deserializeJson(doc, payload, length);
-
-        if (!error)
+        // Fast JSON parsing with minimal validation
+        if (length > 0 && length < 512)
         {
-            const char *status = doc["status"];
-            if (status && strcmp(status, "ok") == 0)
-            {
-                Serial.println("Server acknowledged");
-            }
+            StaticJsonDocument<256> responseDoc;
+            DeserializationError error = deserializeJson(responseDoc, payload, length);
 
-            // Handle attendance response
-            if (doc.containsKey("event"))
+            if (!error)
             {
-                const char *event = doc["event"];
-                if (strcmp(event, "attendance_in") == 0)
+                // Check for scan mode command
+                const char *type = responseDoc["type"];
+                if (type && strcmp(type, "start_scan") == 0)
                 {
-                    const char *teacher = doc["data"]["teacher"];
-                    if (teacher)
+                    Serial.println("Received scan mode command");
+                    enterScanMode();
+                    break;
+                }
+
+                // Check for timeout warning (5 minutes before auto-out)
+                if (type && strcmp(type, "timeout_warning") == 0)
+                {
+                    Serial.println("Received timeout warning - 5 minutes remaining!");
+                    handleTimeoutWarning();
+                    break;
+                }
+
+                // Check for final timeout notification
+                if (type && strcmp(type, "timeout_final") == 0)
+                {
+                    Serial.println("Received final timeout notification");
+                    handleTimeoutFinal();
+                    break;
+                }
+
+                // Check for attendance response
+                const char *event = responseDoc["event"];
+                Serial.println("[Debug] Checking for attendance response");
+                if (event)
+                {
+                    Serial.print("[Debug] Event found: ");
+                    Serial.println(event);
+
+                    // Debug: Print entire data object
+                    if (responseDoc.containsKey("data"))
                     {
-                        currentTeacher = String(teacher);
-                        displayMessage("Welcome!", currentTeacher.substring(0, 16));
+                        Serial.println("[Debug] Data object:");
+                        serializeJsonPretty(responseDoc["data"], Serial);
+                        Serial.println();
+                    }
+
+                    if (strcmp(event, "attendance_in") == 0)
+                    {
+                        Serial.println("[Debug] Processing attendance [IN]");
+                        const char *teacher = responseDoc["data"]["teacher"];
+                        if (teacher)
+                        {
+                            Serial.print("[DEBUG] Teacher extracted: ");
+                            Serial.println(teacher);
+                            currentTeacher = teacher;
+                            displayMessage("Welcome!", teacher);
+                            // Success feedback
+                            feedbackPattern(LED_GREEN_PIN, 2, 50, 50);
+                            // Turn ON classroom lights
+                            turnLightsOn();
+                        }
+                        else
+                        {
+                            Serial.println("[DEBUG] WARNING: teacher field is NULL or missing!");
+                        }
+                    }
+                    else if (strcmp(event, "attendance_out") == 0)
+                    {
+                        Serial.println("[Debug] Processing attendance [OUT]");
+                        const char *teacher = responseDoc["data"]["teacher"];
+                        if (teacher)
+                        {
+                            Serial.print("[DEBUG] Teacher checkout: ");
+                            Serial.println(teacher);
+                            displayMessage("Goodbye!", teacher);
+                            currentTeacher = "";
+                            // Checkout feedback - synchronized LED and buzzer
+                            feedbackPattern(LED_GREEN_PIN, 3, 150, 150);
+                            // Turn OFF classroom lights (no active teacher)
+                            turnLightsOff();
+                        }
+                    }
+                    else if (strcmp(event, "attendance_invalid") == 0)
+                    {
+                        displayMessage("Error!", "Invalid Sched.");
+                        feedbackPattern(LED_RED_PIN, 3, 500, 500);
+                    }
+                    else if (strcmp(event, "attendance_error") == 0)
+                    {
+                        Serial.println("[Debug] Processing attendance [ERROR]");
+                        const char *message = responseDoc["data"]["message"];
+                        Serial.print("[DEBUG] Error message: ");
+                        Serial.println(message ? message : "NULL");
+                        displayMessage("Error!", message ? message : "Unknown");
+                        // Error feedback
+                        feedbackPattern(LED_RED_PIN, 3, 500, 500);
+                    }
+                    else
+                    {
+                        Serial.print("[DEBUG] Unknown event type: ");
+                        Serial.println(event);
                     }
                 }
-                else if (strcmp(event, "attendance_error") == 0)
+                else
                 {
-                    const char *message = doc["data"]["message"];
-                    displayMessage("Error!", message ? message : "Unknown");
+                    Serial.println("[Debug] No 'event' field in response");
                 }
             }
         }
         break;
     }
 
-    case WStype_BIN:
-        Serial.println("Binary data received (ignored)");
-        break;
-
-    case WStype_ERROR:
-        Serial.println("WebSocket Error!");
-        wsConnected = false;
-        break;
-
     case WStype_PING:
-        Serial.println("Ping received");
+        Serial.println("WebSocket PING received");
         break;
 
     case WStype_PONG:
-        Serial.println("Pong received");
+        Serial.println("WebSocket PONG received");
         break;
 
     default:
@@ -358,129 +541,136 @@ void webSocketEvent(WStype_t type, uint8_t *payload, size_t length)
     }
 }
 
-// ============== SEND RFID DATA ==============
-void sendRfidData(String rfidUid)
+// ============== CHECK WEBSOCKET CONNECTION HEALTH ==============
+void checkWsConnection()
 {
-    StaticJsonDocument<256> doc;
+    unsigned long currentMillis = millis();
 
-    doc["device_id"] = DEVICE_ID;
-    doc["rfid_uid"] = rfidUid;
-    doc["power"] = currentPower;
-    // No timestamp needed - server uses auto_now_add for time_in
-
-    String jsonString;
-    serializeJson(doc, jsonString);
-
-    Serial.print("Sending RFID data: ");
-    Serial.println(jsonString);
-
-    webSocket.sendTXT(jsonString);
-
-    displayMessage("Card Sent!", rfidUid.substring(0, 16));
+    // If no activity for 30 seconds, consider connection dead
+    if (currentMillis - wsLastActivity > 30000)
+    {
+        Serial.println("WebSocket connection appears dead, reconnecting...");
+        wsConnected = false;
+        webSocket.disconnect();
+    }
 }
 
-// ============== SEND POWER DATA ==============
-void sendPowerData(float watts)
+// ============== DATA SENDING FUNCTIONS (OPTIMIZED) ==============
+void sendRfidData(const String &rfidUid)
 {
-    StaticJsonDocument<256> doc;
+    // Reuse document to avoid allocation
+    rfidDoc.clear();
 
-    doc["device_id"] = DEVICE_ID;
-    doc["power"] = watts;
-    // No timestamp needed - server uses auto_now_add
+    rfidDoc["device_id"] = DEVICE_ID;
+    rfidDoc["rfid_uid"] = rfidUid;
+    rfidDoc["voltage"] = currentVoltage;
+    rfidDoc["current"] = currentCurrent;
+    rfidDoc["power"] = currentPower;
 
-    String jsonString;
-    serializeJson(doc, jsonString);
+    // Serialize directly to WebSocket buffer
+    size_t len = measureJson(rfidDoc);
+    char buffer[JSON_RFID_BUFFER];
+    serializeJson(rfidDoc, buffer, sizeof(buffer));
 
-    Serial.print("Sending power data: ");
-    Serial.println(jsonString);
-
-    webSocket.sendTXT(jsonString);
+    if (webSocket.sendTXT(buffer, len))
+    {
+        wsLastActivity = millis();
+        displayMessage("Card Sent!", rfidUid.c_str());
+    }
+    else
+    {
+        Serial.println("Failed to send RFID data!");
+        wsConnected = false;
+    }
 }
 
-// ============== SEND HEARTBEAT ==============
+void sendPowerData(float voltage, float current, float watts)
+{
+    powerDoc.clear();
+
+    powerDoc["device_id"] = DEVICE_ID;
+    powerDoc["voltage"] = voltage;
+    powerDoc["current"] = current;
+    powerDoc["power"] = watts;
+
+    char buffer[JSON_POWER_BUFFER];
+    size_t len = serializeJson(powerDoc, buffer, sizeof(buffer));
+
+    // Debug: Print what we're sending
+    Serial.printf("[DEBUG] Sending JSON: %s\n", buffer);
+    Serial.printf("[DEBUG] JSON size: %d bytes\n", len);
+
+    if (webSocket.sendTXT(buffer))
+    {
+        wsLastActivity = millis();
+    }
+    else
+    {
+        Serial.println("Failed to send power data!");
+        wsConnected = false;
+    }
+}
+
 void sendHeartbeat()
 {
-    StaticJsonDocument<128> doc;
+    heartbeatDoc.clear();
 
-    doc["device_id"] = DEVICE_ID;
-    doc["type"] = "heartbeat";
-    // No timestamp needed
+    heartbeatDoc["device_id"] = DEVICE_ID;
+    heartbeatDoc["type"] = "heartbeat";
 
-    String jsonString;
-    serializeJson(doc, jsonString);
+    char buffer[JSON_HEARTBEAT_BUFFER];
+    serializeJson(heartbeatDoc, buffer, sizeof(buffer));
 
-    webSocket.sendTXT(jsonString);
+    if (webSocket.sendTXT(buffer))
+    {
+        wsLastActivity = millis();
+    }
+    else
+    {
+        Serial.println("Failed to send heartbeat!");
+        wsConnected = false;
+    }
 }
 
-// ============== GET ISO TIMESTAMP ==============
-String getISOTimestamp()
+void sendWsPing()
 {
-    struct tm timeinfo;
-    if (!getLocalTime(&timeinfo))
+    // Send a simple ping message
+    if (webSocket.sendTXT("ping"))
     {
-        Serial.println("Failed to obtain time, using fallback");
-        // Return empty string to let server use its own time
-        return "";
+        wsLastActivity = millis();
     }
-
-    // Format as ISO 8601 with timezone offset for Philippines (UTC+8)
-    char timestamp[30];
-    sprintf(timestamp, "%04d-%02d-%02dT%02d:%02d:%02d+08:00",
-            timeinfo.tm_year + 1900,
-            timeinfo.tm_mon + 1,
-            timeinfo.tm_mday,
-            timeinfo.tm_hour,
-            timeinfo.tm_min,
-            timeinfo.tm_sec);
-    return String(timestamp);
+    else
+    {
+        Serial.println("Failed to send ping!");
+        wsConnected = false;
+    }
 }
 
 // ============== NTP SETUP ==============
 void setupNTP()
 {
     Serial.println("Configuring NTP time...");
-    displayMessage("Syncing Time...", "");
 
     configTime(GMT_OFFSET_SEC, DAYLIGHT_OFFSET_SEC, NTP_SERVER);
 
-    // Wait for time to be set (max 10 seconds)
+    // Wait with timeout
     struct tm timeinfo;
-    int attempts = 0;
-    while (!getLocalTime(&timeinfo) && attempts < 10)
+    for (int i = 0; i < 5; i++)
     {
-        Serial.println("Waiting for NTP time sync...");
-        delay(1000);
-        attempts++;
+        if (getLocalTime(&timeinfo))
+        {
+            timeSync = true;
+            Serial.printf("Time: %02d:%02d:%02d\n",
+                          timeinfo.tm_hour, timeinfo.tm_min, timeinfo.tm_sec);
+            return;
+        }
+        delay(500);
     }
 
-    if (getLocalTime(&timeinfo))
-    {
-        timeSync = true;
-        Serial.println("NTP Time synchronized!");
-        Serial.printf("Current time: %04d-%02d-%02d %02d:%02d:%02d\n",
-                      timeinfo.tm_year + 1900,
-                      timeinfo.tm_mon + 1,
-                      timeinfo.tm_mday,
-                      timeinfo.tm_hour,
-                      timeinfo.tm_min,
-                      timeinfo.tm_sec);
-        displayMessage("Time Synced!", "");
-    }
-    else
-    {
-        timeSync = false;
-        Serial.println("WARNING: Could not sync time with NTP");
-        displayMessage("Time Sync Fail", "Using server time");
-    }
-    delay(500);
+    Serial.println("NTP sync failed");
 }
 
-bool isTimeSynced()
-{
-    return timeSync;
-}
-
-// ============== RFID SETUP & READ ==============
+// ============== RFID SETUP ==============
 void setupRFID()
 {
     SPI.begin();
@@ -492,40 +682,30 @@ void setupRFID()
     displayMessage("RFID Ready", "");
 }
 
+// ============== RFID READ (OPTIMIZED) ==============
 String readRFID()
 {
-    // Check for new card
-    if (!rfid.PICC_IsNewCardPresent())
+    // Quick check for card presence
+    if (!rfid.PICC_IsNewCardPresent() || !rfid.PICC_ReadCardSerial())
     {
         return "";
     }
 
-    // Read card serial
-    if (!rfid.PICC_ReadCardSerial())
-    {
-        return "";
-    }
-
-    // Convert UID to string
-    String uidString = "";
+    // Convert UID to hex string
+    char uidBuffer[20];
     for (byte i = 0; i < rfid.uid.size; i++)
     {
-        if (rfid.uid.uidByte[i] < 0x10)
-        {
-            uidString += "0";
-        }
-        uidString += String(rfid.uid.uidByte[i], HEX);
+        sprintf(uidBuffer + (i * 2), "%02X", rfid.uid.uidByte[i]);
     }
-    uidString.toUpperCase();
 
-    // Halt PICC and stop encryption
+    // Stop quickly
     rfid.PICC_HaltA();
     rfid.PCD_StopCrypto1();
 
-    return uidString;
+    return String(uidBuffer);
 }
 
-// ============== LCD SETUP & UPDATE ==============
+// ============== LCD SETUP ==============
 void setupLCD()
 {
     lcd.init();
@@ -535,37 +715,42 @@ void setupLCD()
     Serial.println("LCD Initialized");
 }
 
-void displayMessage(String line1, String line2)
+// ============== LCD FUNCTIONS ==============
+void displayMessage(const char *line1, const char *line2)
 {
     lcd.clear();
 
-    // Center line 1
-    int pad1 = (LCD_COLUMNS - line1.length()) / 2;
-    if (pad1 < 0)
-        pad1 = 0;
+    // Center first line
+    int len1 = min(strlen(line1), (size_t)LCD_COLUMNS);
+    int pad1 = (LCD_COLUMNS - len1) / 2;
     lcd.setCursor(pad1, 0);
-    lcd.print(line1.substring(0, LCD_COLUMNS));
+    lcd.print(line1);
 
-    // Center line 2
-    int pad2 = (LCD_COLUMNS - line2.length()) / 2;
-    if (pad2 < 0)
-        pad2 = 0;
-    lcd.setCursor(pad2, 1);
-    lcd.print(line2.substring(0, LCD_COLUMNS));
+    // Center second line
+    if (line2)
+    {
+        int len2 = min(strlen(line2), (size_t)LCD_COLUMNS);
+        int pad2 = (LCD_COLUMNS - len2) / 2;
+        lcd.setCursor(pad2, 1);
+        lcd.print(line2);
+    }
 }
 
 void updateLCD()
 {
     lcd.clear();
 
-    // Line 1: Time, Status and Power
-    String line1 = formatTime();
-    line1 += wsConnected ? " ON " : " OFF";
-    line1 += String(currentPower, 0) + "W";
+    // Line 1: Time + Status + Power
+    char line1[17];
+    String timeStr = formatTime();
+    snprintf(line1, sizeof(line1), "%s %s %.0fW",
+             timeStr.c_str(),
+             wsConnected ? "ON" : "OFF",
+             currentPower);
     lcd.setCursor(0, 0);
-    lcd.print(line1.substring(0, LCD_COLUMNS));
+    lcd.print(line1);
 
-    // Line 2: Current teacher or ready message
+    // Line 2: Teacher or default message
     lcd.setCursor(0, 1);
     if (currentTeacher.length() > 0)
     {
@@ -573,61 +758,153 @@ void updateLCD()
     }
     else
     {
-        lcd.print("Scan RFID Card");
+        lcd.print("Scan Here...");
     }
 }
 
-// ============== ULTRASONIC SENSOR (POWER SIMULATION) ==============
-void setupUltrasonic()
+// ============== POWER MONITORING SETUP ==============
+void setupPowerMonitoring()
 {
-    pinMode(ULTRASONIC_TRIG, OUTPUT);
-    pinMode(ULTRASONIC_ECHO, INPUT);
+    // Configure ADC for 12-bit resolution (0-4095)
+    analogReadResolution(12);
 
-    Serial.println("Ultrasonic sensor initialized");
+    // Set attenuation for full 0-3.3V range
+    analogSetAttenuation(ADC_11db);
+
+    // Set ADC pins as input
+    pinMode(VOLTAGE_SENSOR_PIN, INPUT);
+    pinMode(CURRENT_SENSOR_PIN, INPUT);
+
+    // Configure ZMPT101B voltage sensor
+    voltageSensor.setSensitivity(ZMPT101B_SENSITIVITY);
+
+    Serial.println("Power monitoring initialized");
+    Serial.printf("Voltage sensor (ZMPT101B): GPIO %d @ %dHz\n", VOLTAGE_SENSOR_PIN, AC_FREQUENCY);
+    Serial.printf("Voltage sensitivity: %.1f\n", ZMPT101B_SENSITIVITY);
+    Serial.printf("Current sensor (ACS724): GPIO %d @ %.1fmV/A\n", CURRENT_SENSOR_PIN, CURRENT_SENSITIVITY * 1000);
+
+    // Calibrate current sensor zero point
+    Serial.println("Calibrating current sensor zero point... (ensure no load)");
+    displayMessage("Calibrating...", "No load please");
+    delay(2000);
+
+    float sum = 0;
+    for (int i = 0; i < 50; i++)
+    {
+        sum += analogRead(CURRENT_SENSOR_PIN);
+        delay(20);
+    }
+
+    float avgAdc = sum / 50.0;
+    quiescentVoltage = (avgAdc / ADC_RESOLUTION) * ADC_REFERENCE_VOLTAGE;
+
+    Serial.printf("Current sensor calibrated - Zero point: %.3fV (ADC: %.1f)\n", quiescentVoltage, avgAdc);
+    Serial.println("Note: Calibrate ZMPT101B_SENSITIVITY with multimeter if needed");
 }
 
-float readUltrasonicPower()
+// ============== READ RMS VOLTAGE (ZMPT101B) ==============
+float readRMSVoltage()
 {
-    // Send ultrasonic pulse
-    digitalWrite(ULTRASONIC_TRIG, LOW);
-    delayMicroseconds(2);
-    digitalWrite(ULTRASONIC_TRIG, HIGH);
-    delayMicroseconds(10);
-    digitalWrite(ULTRASONIC_TRIG, LOW);
+    // Use ZMPT101B library to read RMS voltage
+    // Read 3 periods for more accurate measurement
+    float voltage = voltageSensor.getRmsVoltage(3);
 
-    // Read echo duration
-    long duration = pulseIn(ULTRASONIC_ECHO, HIGH, 30000); // 30ms timeout
+    // Debug: Show raw reading
+    Serial.printf("[DEBUG VOLTAGE] Raw sensor reading: %.2fV\n", voltage);
 
-    // Convert to distance (cm)
-    float distance = duration * 0.034 / 2;
-
-    // Simulate power based on distance (0-400cm -> 0-1000W)
-    // This is just for testing - replace with actual power meter later
-    float simulatedPower = 0;
-    if (distance > 0 && distance < 400)
+    // Sanity checks
+    if (voltage < 0)
     {
-        // myMap distance to power: closer = higher power
-        simulatedPower = myMap(distance, 0, 400, 1000, 0);
-        // Add some random variation
-        simulatedPower += random(-20, 20);
-        if (simulatedPower < 0)
-            simulatedPower = 0;
+        Serial.println("[DEBUG VOLTAGE] Negative value detected, setting to 0");
+        voltage = 0;
     }
-    else
+    if (voltage > 300)
     {
-        // If no reading, return a base load value
-        simulatedPower = 50 + random(0, 30);
+        Serial.printf("[DEBUG VOLTAGE] Value %.2fV > 300V, capping to NOMINAL_VOLTAGE (%.1fV)\n", voltage, NOMINAL_VOLTAGE);
+        voltage = NOMINAL_VOLTAGE; // Cap at reasonable value
     }
 
-    return simulatedPower;
+    return voltage;
 }
+
+// ============== READ RMS CURRENT (ACS724) ==============
+float readRMSCurrent()
+{
+    // Calculate sampling interval based on AC frequency
+    // For 60Hz with 30 samples per cycle: 1,000,000 / 60 / 30 = 555.5 µs
+    float sampleIntervalUs = (1000000.0 / AC_FREQUENCY) / SAMPLES_PER_CYCLE;
+    int totalSamples = SAMPLES_PER_CYCLE * MEASUREMENT_CYCLES; // 30 * 5 = 150 samples
+
+    float sumSquares = 0;
+
+    // Take samples synchronized with AC frequency
+    for (int i = 0; i < totalSamples; i++)
+    {
+        // Read ADC value (12-bit: 0-4095)
+        int adcValue = analogRead(CURRENT_SENSOR_PIN);
+
+        // Convert ADC to voltage (0-3.3V)
+        float voltage = (adcValue / ADC_RESOLUTION) * ADC_REFERENCE_VOLTAGE;
+
+        // Remove DC offset (quiescent voltage at zero current)
+        float acVoltage = voltage - quiescentVoltage;
+
+        // Square the AC voltage for RMS calculation
+        sumSquares += acVoltage * acVoltage;
+
+        // Wait for next sample (synchronized with AC frequency)
+        delayMicroseconds(round(sampleIntervalUs));
+    }
+
+    // Calculate RMS voltage from sensor
+    float meanSquare = sumSquares / totalSamples;
+    float rmsVoltage = sqrt(meanSquare);
+
+    // Convert RMS voltage to current using sensor sensitivity
+    // ACS724: 40mV per A, so Current = RMS_Voltage / 0.040
+    float current = rmsVoltage / CURRENT_SENSITIVITY;
+
+    // Debug output
+    Serial.printf("[DEBUG CURRENT] ADC samples: %d, RMS voltage: %.3fV, Current: %.3fA\n",
+                  totalSamples, rmsVoltage, current);
+
+    // Sanity checks
+    if (current < 0.01)
+        current = 0; // Ignore noise below 10mA
+    if (current > 50)
+        current = 0; // Safety limit for ACS724 50A sensor
+
+    return current;
+}
+
+// ============== CALCULATE REAL POWER ==============
+float calculatePower()
+{
+    // Read voltage and current
+    float voltage = readRMSVoltage();
+    float current = readRMSCurrent();
+
+    // Calculate apparent power (P = V × I)
+    // Note: This assumes unity power factor (resistive load)
+    // For reactive loads (motors, etc.), implement power factor correction
+    float power = voltage * current;
+
+    // Debug output for calibration
+    Serial.printf("V: %.1fV, I: %.3fA, P: %.1fW\n", voltage, current, power);
+
+    // Sanity checks
+    if (power < 0)
+        power = 0;
+    if (power > 10000)
+        power = 0; // Cap at 10kW for safety
+
+    return power;
+}
+
+// Note: calculatePower is kept for backward compatibility,
+// but main loop now calls readRMSVoltage() and readRMSCurrent() directly
 
 // ============== UTILITY FUNCTIONS ==============
-long myMap(long x, long in_min, long in_max, long out_min, long out_max)
-{
-    return (x - in_min) * (out_max - out_min) / (in_max - in_min) + out_min;
-}
-
 String formatTime()
 {
     struct tm timeinfo;
@@ -638,4 +915,315 @@ String formatTime()
     char buffer[6];
     sprintf(buffer, "%02d:%02d", timeinfo.tm_hour, timeinfo.tm_min);
     return String(buffer);
+}
+
+// ============== LED AND BUZZER FUNCTIONS ==============
+void setupIndicators()
+{
+    // Configure LED pins as outputs
+    pinMode(LED_RED_PIN, OUTPUT);
+    pinMode(LED_GREEN_PIN, OUTPUT);
+    pinMode(BUZZER_PIN, OUTPUT);
+    pinMode(RELAY_PIN, OUTPUT);
+
+    // Initialize all off
+    digitalWrite(LED_RED_PIN, LOW);
+    digitalWrite(LED_GREEN_PIN, LOW);
+    digitalWrite(BUZZER_PIN, LOW);
+    digitalWrite(RELAY_PIN, LOW); // Lights OFF on startup (no active teacher)
+
+    Serial.println("Indicators initialized (LED Red: GPIO26, Green: GPIO33, Buzzer: GPIO25)");
+    Serial.println("Relay initialized (Lights Control: GPIO32) - Lights OFF");
+
+    // Power-on test: blink both LEDs and beep
+    setLED(LED_RED_PIN, true);
+    setLED(LED_GREEN_PIN, true);
+    digitalWrite(RELAY_PIN, HIGH);
+    digitalWrite(BUZZER_PIN, HIGH);
+    delay(1000);
+    setLED(LED_RED_PIN, false);
+    setLED(LED_GREEN_PIN, false);
+    digitalWrite(RELAY_PIN, LOW);
+    digitalWrite(BUZZER_PIN, LOW);
+}
+
+void setLED(int pin, bool state)
+{
+    if (state)
+    {
+        digitalWrite(pin, HIGH);
+    }
+    else
+    {
+        digitalWrite(pin, LOW);
+    }
+}
+
+void blinkLED(int pin, int times, int delayMs)
+{
+    for (int i = 0; i < times; i++)
+    {
+        digitalWrite(pin, HIGH);
+        delay(delayMs);
+        digitalWrite(pin, LOW);
+        if (i < times - 1)
+            delay(delayMs);
+    }
+}
+
+void beepPassiveBuzzer(int durationMs)
+{
+    // For passive buzzer, generate a tone at ~2kHz
+    int frequency = 2000;
+    int period = 1000000 / frequency; // microseconds
+    int cycles = (durationMs * 1000) / period;
+
+    for (int i = 0; i < cycles; i++)
+    {
+        digitalWrite(BUZZER_PIN, HIGH);
+        delayMicroseconds(period / 2);
+        digitalWrite(BUZZER_PIN, LOW);
+        delayMicroseconds(period / 2);
+    }
+}
+
+void beep(int durationMs)
+{
+    // For ACTIVE buzzer - just turn it on/off
+    digitalWrite(BUZZER_PIN, HIGH);
+    blinkLED(LED_GREEN_PIN, 1, durationMs);
+    delay(durationMs);
+    digitalWrite(BUZZER_PIN, LOW);
+}
+
+void beepPattern(int times, int onMs, int offMs)
+{
+    for (int i = 0; i < times; i++)
+    {
+        beep(onMs);
+        if (i < times - 1)
+            delay(offMs);
+    }
+}
+
+// Synchronized feedback
+void feedbackPattern(int ledPin, int times, int onMs, int offMs)
+{
+    for (int i = 0; i < times; i++)
+    {
+        // Turn on both LED and buzzer simultaneously
+        digitalWrite(ledPin, HIGH);
+        digitalWrite(BUZZER_PIN, HIGH);
+        delay(onMs);
+
+        // Turn off both simultaneously
+        digitalWrite(ledPin, LOW);
+        digitalWrite(BUZZER_PIN, LOW);
+
+        // Delay between patterns (except after last one)
+        if (i < times - 1)
+            delay(offMs);
+    }
+}
+
+// ============== SCAN MODE FUNCTIONS ==============
+void enterScanMode()
+{
+    Serial.println("Entering RFID scan mode...");
+    scanMode = true;
+    scanModeStartTime = millis();
+
+    // Turn on red LED to indicate scanning mode
+    setLED(LED_RED_PIN, true);
+    setLED(LED_GREEN_PIN, false);
+
+    // Beep twice to indicate scan mode active
+    beepPattern(2, 100, 100);
+
+    // Update LCD
+    displayMessage("SCAN MODE", "Present tag now");
+
+    Serial.println("Scan mode active - waiting for RFID tag...");
+}
+
+void exitScanMode()
+{
+    Serial.println("Exiting scan mode");
+    scanMode = false;
+
+    // Turn off red LED
+    setLED(LED_RED_PIN, false);
+
+    // Restore normal display
+    displayMessage("System Ready", "Scan RFID Card");
+}
+
+void handleScanMode()
+{
+    rfidProcessing = true;
+
+    // Check for timeout
+    if (millis() - scanModeStartTime > SCAN_MODE_TIMEOUT)
+    {
+        Serial.println("Scan mode timeout");
+
+        // Beep once (error/timeout)
+        beep(500);
+
+        // Send timeout message
+        StaticJsonDocument<128> timeoutDoc;
+        timeoutDoc["type"] = "scan_timeout";
+        timeoutDoc["device_id"] = DEVICE_ID;
+
+        char buffer[128];
+        serializeJson(timeoutDoc, buffer);
+        webSocket.sendTXT(buffer);
+
+        exitScanMode();
+        rfidProcessing = false;
+        return;
+    }
+
+    // Try to read RFID
+    String rfidUid = readRFID();
+
+    if (rfidUid.length() > 0)
+    {
+        Serial.printf("RFID scanned in scan mode: %s\n", rfidUid.c_str());
+
+        // Turn off red LED, turn on green LED
+        setLED(LED_RED_PIN, false);
+        setLED(LED_GREEN_PIN, true);
+
+        // Success beep pattern (3 short beeps)
+        beepPattern(3, 50, 50);
+
+        // Display success
+        displayMessage("Card Scanned!", rfidUid.c_str());
+
+        // Send scan result
+        sendScanResult(rfidUid);
+
+        // Wait a bit before exiting
+        delay(1000);
+
+        // Turn off green LED
+        setLED(LED_GREEN_PIN, false);
+
+        exitScanMode();
+    }
+
+    rfidProcessing = false;
+}
+
+void sendScanResult(const String &rfidUid)
+{
+    StaticJsonDocument<192> scanDoc;
+
+    scanDoc["type"] = "scan_result";
+    scanDoc["device_id"] = DEVICE_ID;
+    scanDoc["rfid_uid"] = rfidUid;
+    scanDoc["timestamp"] = formatTime();
+
+    char buffer[192];
+    serializeJson(scanDoc, buffer);
+
+    if (webSocket.sendTXT(buffer))
+    {
+        wsLastActivity = millis();
+        Serial.println("Scan result sent successfully");
+    }
+    else
+    {
+        Serial.println("Failed to send scan result!");
+    }
+}
+
+// Handle timeout warning (5 minutes before auto-out)
+void handleTimeoutWarning()
+{
+    Serial.println("Timeout warning activated!");
+
+    // Display warning message on LCD
+    displayMessage("WARNING!", "5 min to timeout");
+
+    // Warning indicator: Red LED slow blink pattern (3 times)
+    for (int i = 0; i < 3; i++)
+    {
+        setLED(LED_RED_PIN, true);
+        delay(300);
+        setLED(LED_RED_PIN, false);
+        delay(300);
+    }
+
+    // Warning sound: Two long beeps
+    beep(400);
+    delay(200);
+    beep(400);
+    delay(200);
+
+    // Keep red LED blinking slowly to indicate warning state
+    setLED(LED_RED_PIN, true);
+    delay(500);
+    setLED(LED_RED_PIN, false);
+
+    // Restore display after a moment
+    delay(2000);
+    displayMessage("Time Warning", currentTeacher.length() > 0 ? currentTeacher.c_str() : "Active Session");
+}
+
+// Handle final timeout notification
+void handleTimeoutFinal()
+{
+    Serial.println("Session timed out!");
+
+    // Display timeout message
+    displayMessage("TIMED OUT", "Session Ended");
+
+    // Final notification: Red LED rapid blink (5 times)
+    blinkLED(LED_RED_PIN, 5, 150);
+
+    // Timeout sound: Three short beeps
+    beepPattern(3, 100, 100);
+
+    // Turn OFF classroom lights (no active teacher)
+    turnLightsOff();
+
+    // Clear current teacher
+    currentTeacher = "";
+
+    // Restore normal display after a moment
+    delay(3000);
+    displayMessage("System Ready", "Scan RFID Card");
+}
+
+// ============== RELAY CONTROL FUNCTIONS ==============
+// Control relay for classroom lights (Energy Conservation)
+void setRelay(bool state)
+{
+    if (state)
+    {
+        digitalWrite(RELAY_PIN, HIGH);
+        Serial.println("Relay ON, LIGHTS ON");
+        Serial.println("R1_ON");
+    }
+    else
+    {
+        digitalWrite(RELAY_PIN, LOW);
+        Serial.printf("Relay OFF, LIGHTS OFF");
+        Serial.println("R1_OFF");
+    }
+    Serial.printf("Relay: %s (Lights %s)\n", state ? "ON" : "OFF", state ? "ON" : "OFF");
+}
+
+void turnLightsOn()
+{
+    setRelay(true);
+    Serial.println("[ENERGY] Classroom lights turned ON (Teacher Active)");
+}
+
+void turnLightsOff()
+{
+    setRelay(false);
+    Serial.println("[ENERGY] Classroom lights turned OFF (No Active Teacher - Energy Saving)");
 }

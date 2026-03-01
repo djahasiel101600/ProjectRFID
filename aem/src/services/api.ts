@@ -2,7 +2,8 @@
 
 import type { 
   User, Classroom, Schedule, AttendanceSession, 
-  EnergyLog, EnergyReport, DashboardData, LoginResponse 
+  EnergyLog, EnergyReport, DashboardData, LoginResponse,
+  TeacherEnergyUsage, TeacherEnergySummary, TeacherEnergyByClassroom, TeacherEnergyByDate
 } from '../types';
 
 const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000/api';
@@ -276,6 +277,81 @@ class ApiService {
 
     const query = searchParams.toString();
     return this.request<EnergyReport[]>(`/energy/report/${query ? `?${query}` : ''}`);
+  }
+
+  // Teacher Energy Usage
+  async getTeacherEnergy(params?: { 
+    teacher?: number; 
+    classroom?: number; 
+    start?: string; 
+    end?: string 
+  }): Promise<TeacherEnergyUsage[]> {
+    const searchParams = new URLSearchParams();
+    if (params?.teacher) searchParams.append('teacher', params.teacher.toString());
+    if (params?.classroom) searchParams.append('classroom', params.classroom.toString());
+    if (params?.start) searchParams.append('start', params.start);
+    if (params?.end) searchParams.append('end', params.end);
+
+    const query = searchParams.toString();
+    const response = await this.request<{ results?: TeacherEnergyUsage[] } | TeacherEnergyUsage[]>(
+      `/teacher-energy/${query ? `?${query}` : ''}`
+    );
+    
+    if (Array.isArray(response)) {
+      return response;
+    }
+    return response.results || [];
+  }
+
+  async getTeacherEnergySummary(params?: { 
+    start?: string; 
+    end?: string 
+  }): Promise<TeacherEnergySummary[]> {
+    const searchParams = new URLSearchParams();
+    if (params?.start) searchParams.append('start', params.start);
+    if (params?.end) searchParams.append('end', params.end);
+
+    const query = searchParams.toString();
+    return this.request<TeacherEnergySummary[]>(
+      `/teacher-energy/summary/${query ? `?${query}` : ''}`
+    );
+  }
+
+  async getTeacherEnergyByClassroom(teacherId: number, params?: {
+    start?: string;
+    end?: string;
+  }): Promise<TeacherEnergyByClassroom[]> {
+    const searchParams = new URLSearchParams();
+    searchParams.append('teacher', teacherId.toString());
+    if (params?.start) searchParams.append('start', params.start);
+    if (params?.end) searchParams.append('end', params.end);
+
+    const query = searchParams.toString();
+    return this.request<TeacherEnergyByClassroom[]>(
+      `/teacher-energy/by_classroom/?${query}`
+    );
+  }
+
+  async getTeacherEnergyByDate(params?: {
+    teacher?: number;
+    start?: string;
+    end?: string;
+  }): Promise<TeacherEnergyByDate[]> {
+    const searchParams = new URLSearchParams();
+    if (params?.teacher) searchParams.append('teacher', params.teacher.toString());
+    if (params?.start) searchParams.append('start', params.start);
+    if (params?.end) searchParams.append('end', params.end);
+
+    const query = searchParams.toString();
+    return this.request<TeacherEnergyByDate[]>(
+      `/teacher-energy/by_date/${query ? `?${query}` : ''}`
+    );
+  }
+
+  async recalculateTeacherEnergy(): Promise<{ message: string }> {
+    return this.request<{ message: string }>('/teacher-energy/recalculate/', {
+      method: 'POST',
+    });
   }
 }
 

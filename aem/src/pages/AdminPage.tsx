@@ -20,6 +20,7 @@ import {
   TableRow,
 } from "../components/ui/table";
 import type { User, Classroom, Schedule } from "../types";
+import { useRFIDScanner } from "../hooks/useRFIDScanner";
 
 // Modal Component
 function Modal({
@@ -121,6 +122,7 @@ function Tabs({
 // ============== TEACHERS TAB ==============
 function TeachersTab() {
   const [teachers, setTeachers] = useState<User[]>([]);
+  const [classrooms, setClassrooms] = useState<Classroom[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [showForm, setShowForm] = useState(false);
   const [editingTeacher, setEditingTeacher] = useState<User | null>(null);
@@ -137,9 +139,39 @@ function TeachersTab() {
     rfid_uid: "",
   });
 
+  // RFID Scanner hook
+  const { isScanning, scannedRFID, scanError, startScan, clearScan } =
+    useRFIDScanner();
+
   useEffect(() => {
     loadTeachers();
+    loadClassrooms();
   }, []);
+
+  // Handle scanned RFID
+  useEffect(() => {
+    if (scannedRFID) {
+      setFormData((prev) => ({ ...prev, rfid_uid: scannedRFID }));
+      setAlert({ type: "success", message: `RFID scanned: ${scannedRFID}` });
+      clearScan();
+    }
+  }, [scannedRFID, clearScan]);
+
+  // Handle scan error
+  useEffect(() => {
+    if (scanError) {
+      setAlert({ type: "error", message: scanError });
+    }
+  }, [scanError]);
+
+  const loadClassrooms = async () => {
+    try {
+      const data = await apiService.getClassrooms();
+      setClassrooms(data.filter((c) => c.is_active));
+    } catch (err) {
+      console.error("Failed to load classrooms:", err);
+    }
+  };
 
   const loadTeachers = async () => {
     try {
@@ -398,17 +430,51 @@ function TeachersTab() {
               </div>
               <div>
                 <Label htmlFor="rfid_uid">RFID UID</Label>
-                <Input
-                  id="rfid_uid"
-                  value={formData.rfid_uid}
-                  onChange={(e) =>
-                    setFormData({
-                      ...formData,
-                      rfid_uid: e.target.value.toUpperCase(),
-                    })
-                  }
-                  placeholder="Optional"
-                />
+                <div className="flex gap-2">
+                  <Input
+                    id="rfid_uid"
+                    value={formData.rfid_uid}
+                    onChange={(e) =>
+                      setFormData({
+                        ...formData,
+                        rfid_uid: e.target.value.toUpperCase(),
+                      })
+                    }
+                    placeholder="Optional - Scan or type"
+                    className="flex-1"
+                  />
+                  <Button
+                    type="button"
+                    variant="outline"
+                    onClick={() => {
+                      if (classrooms.length > 0) {
+                        startScan(classrooms[0].id);
+                      } else {
+                        setAlert({
+                          type: "error",
+                          message:
+                            "No active classrooms found. Please add a classroom first.",
+                        });
+                      }
+                    }}
+                    disabled={isScanning || classrooms.length === 0}
+                    className="min-w-[120px]"
+                  >
+                    {isScanning ? (
+                      <>
+                        <span className="animate-pulse">● </span>
+                        Scanning...
+                      </>
+                    ) : (
+                      "Scan RFID"
+                    )}
+                  </Button>
+                </div>
+                {isScanning && (
+                  <p className="text-xs text-blue-600 mt-1 animate-pulse">
+                    🔴 LED on - Present RFID tag to scanner...
+                  </p>
+                )}
               </div>
               <div className="col-span-2">
                 <Button type="submit" className="w-full">
@@ -483,7 +549,7 @@ function TeachersTab() {
                           onClick={() =>
                             handleDelete(
                               teacher.id,
-                              `${teacher.first_name} ${teacher.last_name}`
+                              `${teacher.first_name} ${teacher.last_name}`,
                             )
                           }
                         >
@@ -508,7 +574,7 @@ function ClassroomsTab() {
   const [isLoading, setIsLoading] = useState(true);
   const [showForm, setShowForm] = useState(false);
   const [editingClassroom, setEditingClassroom] = useState<Classroom | null>(
-    null
+    null,
   );
   const [showToken, setShowToken] = useState<number | null>(null);
   const [alert, setAlert] = useState<{
@@ -583,7 +649,7 @@ function ClassroomsTab() {
   const handleDelete = async (id: number, name: string) => {
     if (
       confirm(
-        `Are you sure you want to delete "${name}"? This will also delete all associated schedules and attendance records.`
+        `Are you sure you want to delete "${name}"? This will also delete all associated schedules and attendance records.`,
       )
     ) {
       try {
