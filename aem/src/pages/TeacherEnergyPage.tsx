@@ -33,7 +33,7 @@ export function TeacherEnergyPage() {
   const [classroomBreakdown, setClassroomBreakdown] = useState<
     TeacherEnergyByClassroom[]
   >([]);
-  const [teachers, setTeachers] = useState<User[]>([]);
+  const [_teachers, setTeachers] = useState<User[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [isRecalculating, setIsRecalculating] = useState(false);
   const [error, setError] = useState<string | null>(null);
