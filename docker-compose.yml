@@ -71,7 +71,8 @@ services:
     depends_on:
       redis:
         condition: service_healthy
-      - backend
+      backend:
+        condition: service_started
 
   celery_beat:
     build:
@@ -89,9 +90,12 @@ services:
       - ./backend:/app
       - backend_data:/app/data
     depends_on:
-      - redis
-      - backend
-      - celery_worker
+      redis:
+        condition: service_healthy
+      backend:
+        condition: service_started
+      celery_worker:
+        condition: service_started
 
 volumes:
   redis_data:
