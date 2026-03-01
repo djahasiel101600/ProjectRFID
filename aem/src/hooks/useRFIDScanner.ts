@@ -30,8 +30,16 @@ export function useRFIDScanner(): RFIDScannerHook {
       }
 
       connectingRef.current = true;
-      const wsUrl = import.meta.env.VITE_WS_URL || 'ws://localhost:8000';
-      const fullUrl = `${wsUrl}/ws/admin/rfid-scan/`;
+      const wsBase = (() => {
+        const envUrl = import.meta.env.VITE_WS_URL;
+        if (envUrl) return envUrl.replace(/\/$/, '');
+        if (typeof window !== 'undefined') {
+          const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+          return `${protocol}//${window.location.host}`;
+        }
+        return 'ws://localhost:8000';
+      })();
+      const fullUrl = `${wsBase}/ws/admin/rfid-scan/`;
       
       console.log(`Connecting to RFID scan WebSocket: ${fullUrl}`);
 

@@ -7,7 +7,7 @@ WORKDIR /app
 # Install deps from requirements + Celery stack (commented in requirements.txt)
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt && \
-    pip install --no-cache-dir celery django-celery-beat redis
+    pip install --no-cache-dir celery django-celery-beat redis channels-redis
 
 COPY . .
 

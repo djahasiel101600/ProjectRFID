@@ -14,6 +14,45 @@ services:
       timeout: 3s
       retries: 5
 
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: backend
+    command: >
+      sh -c "python manage.py migrate --noinput &&
+             python manage.py collectstatic --noinput --clear &&
+             daphne -b 0.0.0.0 -p 8000 backend.asgi:application"
+    environment:
+      - REDIS_URL=redis://redis:6379
+      - CELERY_BROKER_URL=redis://redis:6379/0
+      - CELERY_RESULT_BACKEND=redis://redis:6379/0
+      - DJANGO_SETTINGS_MODULE=backend.settings
+      - ALLOWED_HOSTS=*
+      - DB_PATH=/app/data/db.sqlite3
+      - STATIC_ROOT=/app/staticfiles
+    volumes:
+      - backend_static:/app/staticfiles
+      - backend_data:/app/data
+    depends_on:
+      redis:
+        condition: service_healthy
+    restart: unless-stopped
+
+  frontend:
+    build:
+      context: ./aem
+      dockerfile: Dockerfile
+      args:
+        - VITE_API_URL=/api
+        - VITE_WS_URL=
+    container_name: frontend
+    ports:
+      - "80:80"
+    depends_on:
+      - backend
+    restart: unless-stopped
+
   celery_worker:
     build:
       context: ./backend
@@ -21,14 +60,18 @@ services:
     container_name: celery_worker
     command: celery -A backend worker -l info
     environment:
+      - REDIS_URL=redis://redis:6379
       - CELERY_BROKER_URL=redis://redis:6379/0
       - CELERY_RESULT_BACKEND=redis://redis:6379/0
       - DJANGO_SETTINGS_MODULE=backend.settings
+      - DB_PATH=/app/data/db.sqlite3
     volumes:
       - ./backend:/app
+      - backend_data:/app/data
     depends_on:
       redis:
         condition: service_healthy
+      - backend
 
   celery_beat:
     build:
@@ -37,14 +80,20 @@ services:
     container_name: celery_beat
     command: celery -A backend beat -l info --scheduler django_celery_beat.schedulers:DatabaseScheduler
     environment:
+      - REDIS_URL=redis://redis:6379
       - CELERY_BROKER_URL=redis://redis:6379/0
       - CELERY_RESULT_BACKEND=redis://redis:6379/0
       - DJANGO_SETTINGS_MODULE=backend.settings
+      - DB_PATH=/app/data/db.sqlite3
     volumes:
       - ./backend:/app
+      - backend_data:/app/data
     depends_on:
       - redis
+      - backend
       - celery_worker
 
 volumes:
   redis_data:
+  backend_static:
+  backend_data:

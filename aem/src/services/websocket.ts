@@ -4,6 +4,16 @@ import type { WSMessage } from '../types';
 
 type MessageHandler = (message: WSMessage) => void;
 
+function getWsBaseUrl(): string {
+  const envUrl = import.meta.env.VITE_WS_URL;
+  if (envUrl) return envUrl.replace(/\/$/, '');
+  if (typeof window !== 'undefined') {
+    const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+    return `${protocol}//${window.location.host}`;
+  }
+  return 'ws://localhost:8000';
+}
+
 class WebSocketService {
   private ws: WebSocket | null = null;
   private reconnectAttempts = 0;
@@ -40,10 +50,10 @@ class WebSocketService {
 
     this.isConnecting = true;
     this.classroomId = classroomId ?? null;
-    const wsUrl = import.meta.env.VITE_WS_URL || 'ws://localhost:8000';
-    const endpoint = classroomId 
-      ? `${wsUrl}/ws/dashboard/classroom/${classroomId}/`
-      : `${wsUrl}/ws/dashboard/`;
+    const wsBase = getWsBaseUrl();
+    const endpoint = classroomId
+      ? `${wsBase}/ws/dashboard/classroom/${classroomId}/`
+      : `${wsBase}/ws/dashboard/`;
 
     try {
       this.ws = new WebSocket(endpoint);

@@ -10,7 +10,9 @@ For the full list of settings and their values, see
 https://docs.djangoproject.com/en/6.0/ref/settings/
 """
 
+import os
 from pathlib import Path
+from urllib.parse import urlparse
 
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
 BASE_DIR = Path(__file__).resolve().parent.parent
@@ -25,7 +27,9 @@ SECRET_KEY = 'django-insecure-hns*nmxlr969%k8to24jw1f4@i95czwp3dy5(kc!-dzgy#u)@v
 # SECURITY WARNING: don't run with debug turned on in production!
 DEBUG = True
 
-ALLOWED_HOSTS = ['localhost', '127.0.0.1', '192.168.1.18', '192.168.1.30']
+ALLOWED_HOSTS = [x.strip() for x in os.environ.get('ALLOWED_HOSTS', 'localhost,127.0.0.1,192.168.1.18,192.168.1.30').split(',')]
+if '*' in ALLOWED_HOSTS:
+    ALLOWED_HOSTS = ['*']
 
 
 # Application definition
@@ -91,7 +95,7 @@ WSGI_APPLICATION = 'backend.wsgi.application'
 DATABASES = {
     'default': {
         'ENGINE': 'django.db.backends.sqlite3',
-        'NAME': BASE_DIR / 'db.sqlite3',
+        'NAME': os.environ.get('DB_PATH', str(BASE_DIR / 'db.sqlite3')),
         'OPTIONS': {
             # Increase timeout for database locks (in seconds)
             'timeout': 30,
@@ -137,7 +141,7 @@ CELERY_ENABLE_UTC = False  # Disable UTC, use local timezone
 # https://docs.djangoproject.com/en/6.0/howto/static-files/
 
 STATIC_URL = 'static/'
-STATIC_ROOT = BASE_DIR / 'staticfiles'
+STATIC_ROOT = os.environ.get('STATIC_ROOT', str(BASE_DIR / 'staticfiles'))
 STATICFILES_DIRS = [
     BASE_DIR / 'static',
 ]
@@ -180,11 +184,16 @@ SIMPLE_JWT = {
 # Django Channels Configuration
 ASGI_APPLICATION = 'backend.asgi.application'
 
+_redis_url = os.environ.get('REDIS_URL', 'redis://127.0.0.1:6379')
+_redis_parsed = urlparse(_redis_url)
+_redis_host = _redis_parsed.hostname or '127.0.0.1'
+_redis_port = _redis_parsed.port or 6379
+
 CHANNEL_LAYERS = {
     'default': {
         'BACKEND': 'channels_redis.core.RedisChannelLayer',
         'CONFIG': {
-            'hosts': [('127.0.0.1', 6379)],
+            'hosts': [(_redis_host, _redis_port)],
         },
     },
 }
@@ -195,7 +204,9 @@ CORS_ALLOWED_ORIGINS = [
     "http://localhost:8080",
     "http://127.0.0.1:5173",
     "http://192.168.1.18:8000",
-    "http://192.168.1.30"
+    "http://192.168.1.30",
+    "http://localhost",
+    "http://127.0.0.1",
 ]
 
 CORS_ALLOW_CREDENTIALS = True
@@ -204,15 +215,11 @@ CORS_ALLOW_CREDENTIALS = True
 # CORS_ALLOW_ALL_ORIGINS = True
 
 # ============== CELERY CONFIGURATION ==============
-# Broker URL - Redis is recommended for production
-# For development without Redis, use the database as broker
-CELERY_BROKER_URL = 'redis://localhost:6379/0'  # Redis broker
-# Alternative: Use database as broker (slower, but no Redis required)
-# CELERY_BROKER_URL = 'sqla+sqlite:///celerydb.sqlite'
-
-CELERY_RESULT_BACKEND = 'redis://localhost:6379/0'
-# Alternative for database backend:
-# CELERY_RESULT_BACKEND = 'django-db'
+# Broker URL - use REDIS_URL in Docker, else localhost
+CELERY_BROKER_URL = os.environ.get('CELERY_BROKER_URL', os.environ.get('REDIS_URL', 'redis://localhost:6379/0'))
+if not CELERY_BROKER_URL.endswith('/0'):
+    CELERY_BROKER_URL = CELERY_BROKER_URL.rstrip('/') + '/0'
+CELERY_RESULT_BACKEND = os.environ.get('CELERY_RESULT_BACKEND', CELERY_BROKER_URL)
 
 CELERY_ACCEPT_CONTENT = ['json']
 CELERY_TASK_SERIALIZER = 'json'
