@@ -20,8 +20,7 @@ services:
       dockerfile: Dockerfile
     container_name: backend
     command: >
-      sh -c "python manage.py migrate --noinput &&
-             python manage.py collectstatic --noinput --clear &&
+      sh -c "python manage.py collectstatic --noinput --clear &&
              daphne -b 0.0.0.0 -p 8000 backend.asgi:application"
     environment:
       - REDIS_URL=redis://redis:6379

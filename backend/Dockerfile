@@ -11,5 +11,10 @@ RUN pip install --no-cache-dir -r requirements.txt && \
 
 COPY . .
 
-# Default command (overridden by docker-compose for worker/beat)
+# Entrypoint runs migrations, then the main command
+COPY entrypoint.sh /entrypoint.sh
+RUN chmod +x /entrypoint.sh
+ENTRYPOINT ["/entrypoint.sh"]
+
+# Default command (overridden by docker-compose for web/worker/beat)
 CMD ["celery", "-A", "backend", "worker", "-l", "info"]
