@@ -57,11 +57,11 @@
 
 // ============== CONFIGURATION ==============
 // WiFi Configuration
-const char *WIFI_SSID = "2.4GHz-Band";
-const char *WIFI_PASSWORD = "#2.4GHz-Band_21";
+const char *WIFI_SSID = "PATAOD MOG INYO!";
+const char *WIFI_PASSWORD = "WWW.CUPID.com_1223";
 
 // WebSocket Server Configuration
-const char *WS_HOST = "192.168.1.11";
+const char *WS_HOST = "192.168.254.121";
 const uint16_t WS_PORT = 8000;
 const char *DEVICE_TOKEN = "ESP32-H3WV263437R";
 const int CLASSROOM_ID = 1;
