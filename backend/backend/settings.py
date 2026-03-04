@@ -244,3 +244,7 @@ CELERY_BEAT_SCHEDULE = {
 # Use django-celery-beat for dynamic task scheduling via Django Admin
 CELERY_BEAT_SCHEDULER = 'django_celery_beat.schedulers:DatabaseScheduler'
 
+# Energy buffer: window (seconds) before saving aggregated row to DB
+# Real-time broadcasts happen every message; DB saves use averaged values per window
+ENERGY_SAVE_WINDOW_SECONDS = int(os.environ.get('ENERGY_SAVE_WINDOW_SECONDS', 60))
+

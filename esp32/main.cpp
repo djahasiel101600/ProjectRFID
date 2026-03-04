@@ -78,8 +78,8 @@ const int DAYLIGHT_OFFSET_SEC = 0;
 #define AC_FREQUENCY 60              // AC line frequency in Hz (50Hz or 60Hz)
 #define ZMPT101B_SENSITIVITY 483.50f // ZMPT101B sensitivity (calibrate with actual voltage)
 #define CURRENT_SENSITIVITY 0.039f   // ACS724: 40mV per A
-#define SAMPLES_PER_CYCLE 70         // Samples per AC cycle for accurate RMS
-#define MEASUREMENT_CYCLES 40         // Number of cycles to measure (more = more stable) for Current Sensor
+#define SAMPLES_PER_CYCLE 30         // Samples per AC cycle (reduced for faster loop)
+#define MEASUREMENT_CYCLES 5         // Number of cycles (balanced: accuracy vs responsiveness)
 #define NOMINAL_VOLTAGE 230.0        // Expected AC voltage (adjust for your region: 110V/220V/230V)
 #define ADC_REFERENCE_VOLTAGE 3.3f   // ESP32 ADC reference voltage
 #define ADC_RESOLUTION 4095.0f       // 12-bit ADC (0-4095)
@@ -105,7 +105,7 @@ const int DAYLIGHT_OFFSET_SEC = 0;
 
 // ============== REAL-TIME OPTIMIZATION ==============
 // Reduced intervals for faster response
-#define POWER_READ_INTERVAL 5000 // 5 seconds (was 60 seconds)
+#define POWER_READ_INTERVAL 1000 // 1 second for real-time dashboard
 #define RFID_READ_INTERVAL 50    // 50ms (was 100ms)
 #define LCD_UPDATE_INTERVAL 100  // 100ms (was 1 second)
 #define HEARTBEAT_INTERVAL 30000 // 30 seconds
@@ -265,9 +265,6 @@ void loop()
         currentVoltage = readRMSVoltage();
         currentCurrent = readRMSCurrent();
         currentPower = currentVoltage * currentCurrent;
-
-        Serial.printf("V: %.1fV, I: %.3fA, P: %.1fW\n", currentVoltage, currentCurrent, currentPower);
-        Serial.printf("[DEBUG] Before sending - Voltage: %.4f, Current: %.6f, Power: %.4f\n", currentVoltage, currentCurrent, currentPower);
 
         if (wsConnected)
         {
@@ -597,11 +594,7 @@ void sendPowerData(float voltage, float current, float watts)
     powerDoc["power"] = watts;
 
     char buffer[JSON_POWER_BUFFER];
-    size_t len = serializeJson(powerDoc, buffer, sizeof(buffer));
-
-    // Debug: Print what we're sending
-    Serial.printf("[DEBUG] Sending JSON: %s\n", buffer);
-    Serial.printf("[DEBUG] JSON size: %d bytes\n", len);
+    serializeJson(powerDoc, buffer, sizeof(buffer));
 
     if (webSocket.sendTXT(buffer))
     {

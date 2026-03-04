@@ -187,10 +187,7 @@ class IoTConsumer(AsyncWebsocketConsumer):
             
             # Process power reading if present
             if power is not None:
-                energy_log = await self.save_energy_log(power, voltage, current)
-                
-                # Broadcast power update to dashboard (use the auto-generated timestamp)
-                print(f"[IoT] Broadcasting power update to dashboard_classroom_{self.classroom_id}: {power}W ({voltage}V, {current}A)")
+                # 1. Always broadcast to dashboard (real-time)
                 await self.channel_layer.group_send(
                     f'dashboard_classroom_{self.classroom_id}',
                     {
@@ -199,9 +196,16 @@ class IoTConsumer(AsyncWebsocketConsumer):
                         'voltage': voltage,
                         'current': current,
                         'watts': power,
-                        'timestamp': energy_log.timestamp.isoformat() if energy_log else timezone.now().isoformat()
+                        'timestamp': timezone.now().isoformat()
                     }
                 )
+                # 2. Add to buffer; save aggregated row when window completes
+                from core.services.energy_buffer import add_reading, flush_and_aggregate
+                should_flush = add_reading(self.classroom_id, voltage, current, power, timestamp)
+                if should_flush:
+                    agg = flush_and_aggregate(self.classroom_id)
+                    if agg and agg.get('avg_watts') is not None:
+                        await self.save_energy_log_aggregated(agg)
             
             # Send acknowledgment
             await self.send(text_data=json.dumps({
@@ -437,19 +441,18 @@ class IoTConsumer(AsyncWebsocketConsumer):
             }
     
     @database_sync_to_async
-    def save_energy_log(self, watts, voltage=None, current=None):
-        """Save energy reading to database. Timestamp is auto-set by the model."""
+    def save_energy_log_aggregated(self, agg: dict):
+        """Save aggregated energy reading from buffer flush. Timestamp = window midpoint."""
         from core.models import Classroom, EnergyLog
         
         classroom = Classroom.objects.get(id=self.classroom_id)
-        energy_log = EnergyLog.objects.create(
+        EnergyLog.objects.create(
             classroom=classroom,
-            voltage=voltage,
-            current=current,
-            watts=watts
-            # timestamp is auto_now_add - set automatically
+            voltage=agg.get('avg_voltage'),
+            current=agg.get('avg_current'),
+            watts=agg['avg_watts'],
+            timestamp=agg['timestamp']
         )
-        return energy_log
 
 
 class DashboardConsumer(AsyncWebsocketConsumer):

@@ -99,7 +99,7 @@ class EnergyLog(models.Model):
     voltage = models.DecimalField(max_digits=6, decimal_places=2, null=True, blank=True)  # Volts (e.g., 220.50)
     current = models.DecimalField(max_digits=8, decimal_places=4, null=True, blank=True)  # Amps (e.g., 1.2500)
     watts = models.DecimalField(max_digits=10, decimal_places=2)
-    timestamp = models.DateTimeField(auto_now_add=True)  # Auto-set to server time when created
+    timestamp = models.DateTimeField()  # Set explicitly (midpoint of aggregation window)
     # Remove created_at since timestamp now serves the same purpose
     
     class Meta:
