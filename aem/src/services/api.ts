@@ -83,6 +83,35 @@ class ApiService {
   }
 
   // Auth
+  async getSetupStatus(): Promise<{ needs_setup: boolean }> {
+    const response = await fetch(`${API_BASE_URL}/auth/setup-status/`);
+    return response.json();
+  }
+
+  async register(data: {
+    username: string;
+    email: string;
+    password: string;
+    first_name?: string;
+    last_name?: string;
+  }): Promise<LoginResponse> {
+    const result = await fetch(`${API_BASE_URL}/auth/register/`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(data),
+    });
+    const json = await result.json();
+    if (!result.ok) {
+      throw new Error(json.error || 'Registration failed');
+    }
+    this.accessToken = json.access;
+    this.refreshToken = json.refresh;
+    localStorage.setItem('access_token', json.access);
+    localStorage.setItem('refresh_token', json.refresh);
+    localStorage.setItem('user', JSON.stringify(json.user));
+    return json;
+  }
+
   async login(username: string, password: string): Promise<LoginResponse> {
     const data = await this.request<LoginResponse>('/auth/login/', {
       method: 'POST',
@@ -134,6 +163,14 @@ class ApiService {
     return this.request<User>('/users/', {
       method: 'POST',
       body: JSON.stringify(user),
+    });
+  }
+
+  /** Create teacher: first_name, last_name, email only (no username/password). */
+  async createTeacher(data: { first_name: string; last_name: string; email: string; rfid_uid?: string }): Promise<User> {
+    return this.request<User>('/users/', {
+      method: 'POST',
+      body: JSON.stringify({ ...data, role: 'teacher' }),
     });
   }
 

@@ -11,6 +11,19 @@ import { Badge } from "../components/ui/badge";
 import { Button } from "../components/ui/button";
 import type { DashboardClassroom } from "../types";
 
+// Threshold for considering ESP32 device offline (no power data)
+const OFFLINE_THRESHOLD_MS = 2 * 60 * 1000;
+
+function isDeviceOffline(lastPowerUpdate: string | null): boolean {
+  if (!lastPowerUpdate) return true;
+  try {
+    const last = new Date(lastPowerUpdate).getTime();
+    return Date.now() - last > OFFLINE_THRESHOLD_MS;
+  } catch {
+    return true;
+  }
+}
+
 // Memoized ClassroomCard - only re-renders when its props change
 const ClassroomCard = memo(function ClassroomCard({
   classroom,
@@ -18,19 +31,27 @@ const ClassroomCard = memo(function ClassroomCard({
   classroom: DashboardClassroom;
 }) {
   const { remaining, formatted } = useCountdown(classroom.countdown_seconds);
+  const deviceOffline = isDeviceOffline(classroom.last_power_update);
 
   return (
     <Card className="hover:shadow-lg transition-shadow">
       <CardHeader className="pb-2">
-        <div className="flex justify-between items-start">
+        <div className="flex justify-between items-start gap-2">
           <CardTitle className="text-lg">{classroom.name}</CardTitle>
-          <Badge
-            variant={
-              classroom.current_teacher?.full_name ? "success" : "secondary"
-            }
-          >
-            {classroom.current_teacher?.full_name ? "Occupied" : "Available"}
-          </Badge>
+          <div className="flex flex-col items-end gap-1">
+            {deviceOffline && (
+              <Badge variant="destructive" className="text-xs">
+                Device Off
+              </Badge>
+            )}
+            <Badge
+              variant={
+                classroom.current_teacher?.full_name ? "success" : "secondary"
+              }
+            >
+              {classroom.current_teacher?.full_name ? "Occupied" : "Available"}
+            </Badge>
+          </div>
         </div>
       </CardHeader>
       <CardContent>
@@ -183,8 +204,29 @@ export function DashboardPage() {
     );
   }
 
+  const offlineClassrooms = (data.classrooms ?? []).filter((c) =>
+    isDeviceOffline(c.last_power_update)
+  );
+  const hasOfflineDevices = offlineClassrooms.length > 0 && isConnected;
+
   return (
     <div className="space-y-6">
+      {/* ESP32 Device Offline Warning */}
+      {hasOfflineDevices && (
+        <div className="p-4 rounded-lg border-2 border-amber-400 bg-amber-50 dark:bg-amber-900/20 dark:border-amber-600">
+          <p className="font-semibold text-amber-800 dark:text-amber-200">
+            ESP32 Device Offline
+          </p>
+          <p className="text-sm text-amber-700 dark:text-amber-300 mt-1">
+            The following ESP32 device(s) appear to be turned off or disconnected:{" "}
+            <span className="font-medium">
+              {offlineClassrooms.map((c) => c.name).join(", ")}
+            </span>
+            . Please ensure the device is powered on and connected to the network.
+          </p>
+        </div>
+      )}
+
       {/* Header */}
       <div className="flex justify-between items-center">
         <div>

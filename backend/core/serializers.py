@@ -19,7 +19,7 @@ class UserSerializer(serializers.ModelSerializer):
 
 
 class UserCreateSerializer(serializers.ModelSerializer):
-    """Serializer for creating users."""
+    """Serializer for creating admin users (with username/password)."""
     password = serializers.CharField(write_only=True, min_length=8)
     
     class Meta:
@@ -29,6 +29,58 @@ class UserCreateSerializer(serializers.ModelSerializer):
     def create(self, validated_data):
         password = validated_data.pop('password')
         user = User(**validated_data)
+        user.set_password(password)
+        user.save()
+        return user
+
+
+class TeacherCreateSerializer(serializers.ModelSerializer):
+    """Serializer for creating teachers: first_name, last_name, email only. No username/password."""
+    
+    class Meta:
+        model = User
+        fields = ['id', 'first_name', 'last_name', 'email', 'rfid_uid']
+    
+    def create(self, validated_data):
+        import uuid
+        email = validated_data.get('email', '')
+        # Auto-generate username (Django requires it); teachers never log in
+        base = (email.split('@')[0] if email and '@' in email else 'teacher').replace('.', '_')[:100]
+        username = f"{base}_{uuid.uuid4().hex[:6]}"
+        while User.objects.filter(username=username).exists():
+            username = f"{base}_{uuid.uuid4().hex[:6]}"
+        user = User(
+            username=username,
+            email=validated_data.get('email', ''),
+            first_name=validated_data.get('first_name', ''),
+            last_name=validated_data.get('last_name', ''),
+            rfid_uid=validated_data.get('rfid_uid') or None,
+            role='teacher',
+        )
+        user.set_unusable_password()
+        user.save()
+        return user
+
+
+class RegisterSerializer(serializers.Serializer):
+    """Serializer for first-time admin registration."""
+    username = serializers.CharField(max_length=150)
+    email = serializers.EmailField()
+    password = serializers.CharField(write_only=True, min_length=8)
+    first_name = serializers.CharField(required=False, default='')
+    last_name = serializers.CharField(required=False, default='')
+
+    def create(self, validated_data):
+        password = validated_data.pop('password')
+        user = User(
+            username=validated_data['username'],
+            email=validated_data['email'],
+            first_name=validated_data.get('first_name', ''),
+            last_name=validated_data.get('last_name', ''),
+            role='admin',
+            is_staff=True,
+            is_superuser=True,
+        )
         user.set_password(password)
         user.save()
         return user

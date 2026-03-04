@@ -10,9 +10,11 @@ from django.db.models.functions import TruncDate, TruncHour, TruncDay, TruncMont
 from datetime import datetime, timedelta
 from .models import Classroom, Schedule, AttendanceSession, EnergyLog, EnergyAggregation, TeacherEnergyUsage
 from .serializers import (
-    UserSerializer, UserCreateSerializer, ClassroomSerializer, ClassroomCreateSerializer,
+    UserSerializer, UserCreateSerializer, TeacherCreateSerializer,
+    ClassroomSerializer, ClassroomCreateSerializer,
     ScheduleSerializer, AttendanceSessionSerializer, EnergyLogSerializer,
-    EnergyAggregationSerializer, LoginSerializer, AttendanceReportSerializer, EnergyReportSerializer,
+    EnergyAggregationSerializer, LoginSerializer, RegisterSerializer,
+    AttendanceReportSerializer, EnergyReportSerializer,
     TeacherEnergyUsageSerializer, TeacherEnergySummarySerializer
 )
 
@@ -52,6 +54,36 @@ class LoginView(APIView):
         })
 
 
+class SetupStatusView(APIView):
+    """Check if first-time admin setup is needed (no admin exists)."""
+    permission_classes = [permissions.AllowAny]
+
+    def get(self, request):
+        needs_setup = not User.objects.filter(role='admin').exists()
+        return Response({'needs_setup': needs_setup})
+
+
+class RegisterView(APIView):
+    """First-time admin registration. Only available when no admin exists."""
+    permission_classes = [permissions.AllowAny]
+
+    def post(self, request):
+        if User.objects.filter(role='admin').exists():
+            return Response(
+                {'error': 'Admin already exists. Use login instead.'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        serializer = RegisterSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        user = serializer.save()
+        refresh = RefreshToken.for_user(user)
+        return Response({
+            'access': str(refresh.access_token),
+            'refresh': str(refresh),
+            'user': UserSerializer(user).data
+        })
+
+
 class LogoutView(APIView):
     """Handle user logout by blacklisting refresh token."""
     permission_classes = [permissions.IsAuthenticated]
@@ -74,7 +106,8 @@ class UserViewSet(viewsets.ModelViewSet):
     
     def get_serializer_class(self):
         if self.action == 'create':
-            return UserCreateSerializer
+            # Teachers: first_name, last_name, email only (no username/password)
+            return TeacherCreateSerializer
         return UserSerializer
     
     def get_queryset(self):
@@ -83,7 +116,7 @@ class UserViewSet(viewsets.ModelViewSet):
         if role:
             queryset = queryset.filter(role=role)
         return queryset
-    
+
     @action(detail=False, methods=['get'])
     def teachers(self, request):
         """Get all teachers."""

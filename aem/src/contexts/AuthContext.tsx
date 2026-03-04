@@ -12,7 +12,9 @@ interface AuthContextType {
   user: User | null;
   isAuthenticated: boolean;
   isLoading: boolean;
+  needsSetup: boolean | null;
   login: (username: string, password: string) => Promise<void>;
+  register: (data: { username: string; email: string; password: string; first_name?: string; last_name?: string }) => Promise<void>;
   logout: () => void;
 }
 
@@ -21,19 +23,33 @@ const AuthContext = createContext<AuthContextType | undefined>(undefined);
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<User | null>(null);
   const [isLoading, setIsLoading] = useState(true);
+  const [needsSetup, setNeedsSetup] = useState<boolean | null>(null);
 
   useEffect(() => {
-    // Check for existing session
-    const storedUser = apiService.getUser();
-    if (storedUser && apiService.isAuthenticated()) {
-      setUser(storedUser);
-    }
-    setIsLoading(false);
+    const init = async () => {
+      const storedUser = apiService.getUser();
+      if (storedUser && apiService.isAuthenticated()) {
+        setUser(storedUser);
+        setNeedsSetup(false);
+      } else {
+        const status = await apiService.getSetupStatus();
+        setNeedsSetup(status.needs_setup);
+      }
+      setIsLoading(false);
+    };
+    init();
   }, []);
 
   const login = async (username: string, password: string) => {
     const response = await apiService.login(username, password);
     setUser(response.user);
+    setNeedsSetup(false);
+  };
+
+  const register = async (data: { username: string; email: string; password: string; first_name?: string; last_name?: string }) => {
+    const response = await apiService.register(data);
+    setUser(response.user);
+    setNeedsSetup(false);
   };
 
   const logout = () => {
@@ -47,7 +63,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         user,
         isAuthenticated: !!user,
         isLoading,
+        needsSetup,
         login,
+        register,
         logout,
       }}
     >

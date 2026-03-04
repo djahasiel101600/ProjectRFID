@@ -131,11 +131,9 @@ function TeachersTab() {
     message: string;
   } | null>(null);
   const [formData, setFormData] = useState({
-    username: "",
     email: "",
     first_name: "",
     last_name: "",
-    password: "",
     rfid_uid: "",
   });
 
@@ -187,11 +185,9 @@ function TeachersTab() {
 
   const resetForm = () => {
     setFormData({
-      username: "",
       email: "",
       first_name: "",
       last_name: "",
-      password: "",
       rfid_uid: "",
     });
   };
@@ -199,7 +195,7 @@ function TeachersTab() {
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     try {
-      await apiService.createUser({ ...formData, role: "teacher" });
+      await apiService.createTeacher(formData);
       resetForm();
       setShowForm(false);
       setAlert({ type: "success", message: "Teacher created successfully" });
@@ -371,17 +367,6 @@ function TeachersTab() {
           <CardContent>
             <form onSubmit={handleSubmit} className="grid grid-cols-2 gap-4">
               <div>
-                <Label htmlFor="username">Username</Label>
-                <Input
-                  id="username"
-                  value={formData.username}
-                  onChange={(e) =>
-                    setFormData({ ...formData, username: e.target.value })
-                  }
-                  required
-                />
-              </div>
-              <div>
                 <Label htmlFor="email">Email</Label>
                 <Input
                   id="email"
@@ -413,19 +398,6 @@ function TeachersTab() {
                     setFormData({ ...formData, last_name: e.target.value })
                   }
                   required
-                />
-              </div>
-              <div>
-                <Label htmlFor="password">Password</Label>
-                <Input
-                  id="password"
-                  type="password"
-                  value={formData.password}
-                  onChange={(e) =>
-                    setFormData({ ...formData, password: e.target.value })
-                  }
-                  required
-                  minLength={8}
                 />
               </div>
               <div>
