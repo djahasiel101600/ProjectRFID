@@ -101,7 +101,8 @@ const int DAYLIGHT_OFFSET_SEC = 0;
 
 // Energy Conservation - Relay Control
 #define RELAY_PIN 14 // 5V Relay - Controls 230V classroom lights
-#define RFID_REINIT_DELAY_MS 80 // Delay after relay before RFID reinit (EMI settle)
+#define RFID_REINIT_DELAY_MS 80      // Delay after relay ON (EMI settle)
+#define RFID_REINIT_DELAY_OFF_MS 280 // Longer delay after relay OFF (worse EMI/kickback)
 
 // ============== REAL-TIME OPTIMIZATION ==============
 // Reduced intervals for faster response
@@ -128,6 +129,8 @@ volatile bool wsConnected = false; // volatile for interrupt safety
 volatile bool timeSync = false;
 volatile bool rfidProcessing = false; // Prevent concurrent RFID processing
 volatile bool scanMode = false;       // RFID scan mode for admin registration
+volatile bool reinitRfidRequested = false;  // Defer reinit to main loop (avoid blocking in WS callback)
+volatile bool reinitRfidAfterOff = false;   // true = use longer delay (relay OFF has worse EMI)
 unsigned long scanModeStartTime = 0;
 #define SCAN_MODE_TIMEOUT 30000 // 30 seconds timeout
 
@@ -159,7 +162,7 @@ StaticJsonDocument<JSON_HEARTBEAT_BUFFER> heartbeatDoc;
 void setupWiFi();
 void setupWebSocket();
 void setupRFID();
-void reinitRFID(); // Re-initialize RFID after relay trigger (fallback for RC522 lock)
+void reinitRFID(bool afterRelayOff = false); // Re-initialize RFID; call from main loop only
 void setupLCD();
 void setupPowerMonitoring();
 void setupNTP();
@@ -233,6 +236,15 @@ void loop()
 
     // 1. Handle WebSocket events FIRST (highest priority)
     webSocket.loop();
+
+    // 1b. Perform deferred RFID reinit (must run outside WS callback to avoid freeze)
+    if (reinitRfidRequested)
+    {
+        reinitRfidRequested = false;
+        bool afterOff = reinitRfidAfterOff;
+        reinitRfidAfterOff = false;
+        reinitRFID(afterOff);
+    }
 
     // 2. Check WebSocket connection health
     if (wsConnected)
@@ -686,9 +698,11 @@ void setupRFID()
 }
 
 // Re-initialize RFID after relay trigger (fallback for RC522 lock/EMI)
-void reinitRFID()
+// Must be called from main loop only - never from WebSocket callback
+void reinitRFID(bool afterRelayOff)
 {
-    delay(RFID_REINIT_DELAY_MS); // Let relay EMI settle
+    unsigned long delayMs = afterRelayOff ? RFID_REINIT_DELAY_OFF_MS : RFID_REINIT_DELAY_MS;
+    delay(delayMs); // Let relay EMI settle (longer for OFF - worse kickback)
     SPI.begin();
     rfid.PCD_Init();
     Serial.println("RFID re-initialized (post-relay)");
@@ -1211,6 +1225,7 @@ void handleTimeoutFinal()
 
 // ============== RELAY CONTROL FUNCTIONS ==============
 // Control relay for classroom lights (Energy Conservation)
+// Reinit is deferred to main loop to avoid blocking/freeze in WebSocket callback
 void setRelay(bool state)
 {
     if (state)
@@ -1225,10 +1240,9 @@ void setRelay(bool state)
         Serial.println("Relay OFF, LIGHTS OFF");
         Serial.println("R1_OFF");
     }
-    // Serial.println("Relay: %s (Lights %s)\n", state ? "ON" : "OFF", state ? "ON" : "OFF");
 
-    // Fallback: re-initialize RFID after relay trigger (fixes RC522 lock/EMI)
-    reinitRFID();
+    reinitRfidRequested = true;
+    reinitRfidAfterOff = !state; // Longer delay when turning OFF (worse EMI)
 }
 
 void turnLightsOn()
