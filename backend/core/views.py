@@ -6,7 +6,7 @@ from rest_framework_simplejwt.tokens import RefreshToken
 from django.contrib.auth import authenticate, get_user_model
 from django.utils import timezone
 from django.db.models import Sum, Avg, Max, Min, Count
-from django.db.models.functions import TruncDate, TruncHour, TruncDay, TruncMonth
+from django.db.models.functions import TruncDate, TruncHour, TruncDay, TruncWeek, TruncMonth
 from datetime import datetime, timedelta
 from .models import Classroom, Schedule, AttendanceSession, EnergyLog, EnergyAggregation, TeacherEnergyUsage
 from .serializers import (
@@ -316,7 +316,7 @@ class EnergyReportView(APIView):
     
     def get(self, request):
         classroom_id = request.query_params.get('classroom')
-        range_type = request.query_params.get('range', 'day')  # hour, day, month
+        range_type = request.query_params.get('range', 'day')  # hour, day, week, month
         start_date = request.query_params.get('start')
         end_date = request.query_params.get('end')
         
@@ -331,6 +331,8 @@ class EnergyReportView(APIView):
                 start_date = now - timedelta(hours=24)
             elif range_type == 'day':
                 start_date = now - timedelta(days=30)
+            elif range_type == 'week':
+                start_date = now - timedelta(weeks=12)
             else:
                 start_date = now - timedelta(days=365)
         
@@ -347,6 +349,8 @@ class EnergyReportView(APIView):
         # Aggregate based on range type
         if range_type == 'hour':
             trunc_func = TruncHour
+        elif range_type == 'week':
+            trunc_func = TruncWeek
         elif range_type == 'month':
             trunc_func = TruncMonth
         else:

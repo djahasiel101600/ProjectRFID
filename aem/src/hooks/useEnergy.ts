@@ -5,7 +5,7 @@ import wsService from '../services/websocket';
 
 interface EnergyFilters {
   classroom?: number;
-  range?: 'hour' | 'day' | 'month';
+  range?: 'hour' | 'day' | 'week' | 'month';
 }
 
 // Debounce delay for power updates (ms)
@@ -33,7 +33,7 @@ export function useEnergy(filters: EnergyFilters = {}) {
       if (showLoading && !hasInitialLoadRef.current) {
         setIsLoading(true);
       }
-      const params: { classroom?: number; range?: 'hour' | 'day' | 'month' } = {
+      const params: { classroom?: number; range?: 'hour' | 'day' | 'week' | 'month' } = {
         range: filtersRef.current.range || 'day',
       };
 

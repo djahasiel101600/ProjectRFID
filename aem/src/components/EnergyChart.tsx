@@ -42,7 +42,7 @@ const CustomTooltip = memo(function CustomTooltip({
 
 interface EnergyChartProps {
   data: EnergyReport[];
-  range: "hour" | "day" | "month";
+  range: "hour" | "day" | "week" | "month";
   chartType?: "area" | "bar" | "composed";
 }
 
@@ -66,6 +66,12 @@ export const EnergyChart = memo(function EnergyChart({
           return date.toLocaleDateString("en-US", {
             month: "short",
             day: "numeric",
+          });
+        case "week":
+          return date.toLocaleDateString("en-US", {
+            month: "short",
+            day: "numeric",
+            year: "2-digit",
           });
         case "month":
           return date.toLocaleDateString("en-US", {

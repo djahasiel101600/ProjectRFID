@@ -305,7 +305,7 @@ class ApiService {
     return this.request('/energy-logs/latest/');
   }
 
-  async getEnergyReport(params?: { classroom?: number; range?: 'hour' | 'day' | 'month'; start?: string; end?: string }): Promise<EnergyReport[]> {
+  async getEnergyReport(params?: { classroom?: number; range?: 'hour' | 'day' | 'week' | 'month'; start?: string; end?: string }): Promise<EnergyReport[]> {
     const searchParams = new URLSearchParams();
     if (params?.classroom) searchParams.append('classroom', params.classroom.toString());
     if (params?.range) searchParams.append('range', params.range);
