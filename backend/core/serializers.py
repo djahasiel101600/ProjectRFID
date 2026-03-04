@@ -93,7 +93,7 @@ class ClassroomSerializer(serializers.ModelSerializer):
     
     class Meta:
         model = Classroom
-        fields = ['id', 'name', 'device_id', 'is_active', 'current_teacher', 'current_power', 'created_at', 'updated_at']
+        fields = ['id', 'name', 'device_id', 'device_token', 'is_active', 'current_teacher', 'current_power', 'created_at', 'updated_at']
         read_only_fields = ['id', 'created_at', 'updated_at']
     
     def get_current_teacher(self, obj):
