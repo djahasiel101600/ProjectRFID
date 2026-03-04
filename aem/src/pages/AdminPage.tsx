@@ -666,7 +666,11 @@ function ClassroomsTab() {
     setFormData({ ...formData, device_token: token });
   };
 
-  const copyToken = (token: string) => {
+  const copyToken = (token: string | null | undefined) => {
+    if (!token) {
+      setAlert({ type: "error", message: "Token not available" });
+      return;
+    }
     navigator.clipboard.writeText(token);
     setAlert({ type: "success", message: "Token copied to clipboard" });
   };
@@ -711,7 +715,7 @@ function ClassroomsTab() {
               <Label>Device Token (Read-only)</Label>
               <div className="flex gap-2">
                 <Input
-                  value={editingClassroom.device_token}
+                  value={editingClassroom.device_token ?? ""}
                   readOnly
                   className="bg-gray-50"
                 />
