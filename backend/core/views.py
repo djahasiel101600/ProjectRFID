@@ -8,7 +8,7 @@ from django.utils import timezone
 from django.db.models import Sum, Avg, Max, Min, Count
 from django.db.models.functions import TruncDate, TruncHour, TruncDay, TruncWeek, TruncMonth
 from datetime import datetime, timedelta
-from .models import Classroom, Schedule, AttendanceSession, EnergyLog, EnergyAggregation, TeacherEnergyUsage, OverrideRFID
+from .models import Classroom, Schedule, AttendanceSession, EnergyLog, EnergyAggregation, TeacherEnergyUsage, OverrideRFID, MaintenanceRFID
 from .serializers import (
     UserSerializer, UserCreateSerializer, TeacherCreateSerializer,
     ClassroomSerializer, ClassroomCreateSerializer,
@@ -16,7 +16,8 @@ from .serializers import (
     EnergyAggregationSerializer, LoginSerializer, RegisterSerializer,
     AttendanceReportSerializer, EnergyReportSerializer,
     TeacherEnergyUsageSerializer, TeacherEnergySummarySerializer,
-    OverrideRFIDSerializer
+    OverrideRFIDSerializer,
+    MaintenanceRFIDSerializer
 )
 
 User = get_user_model()
@@ -269,6 +270,17 @@ class AttendanceSessionViewSet(viewsets.ModelViewSet):
         ).order_by('-date')
         
         return Response(report_data)
+
+
+class MaintenanceRFIDViewSet(viewsets.ModelViewSet):
+    """ViewSet for managing maintenance/staff RFID cards (lights control only)."""
+    queryset = MaintenanceRFID.objects.filter(is_active=True)
+    serializer_class = MaintenanceRFIDSerializer
+    permission_classes = [permissions.IsAuthenticated, IsAdminUser]
+    
+    def perform_destroy(self, instance):
+        instance.is_active = False
+        instance.save()
 
 
 class OverrideRFIDViewSet(viewsets.ModelViewSet):

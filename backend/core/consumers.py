@@ -167,23 +167,23 @@ class IoTConsumer(AsyncWebsocketConsumer):
             # Process RFID if present (server time is used internally)
             if rfid_uid:
                 result = await self.process_rfid(rfid_uid)
-                                # Send response back to ESP32
+                # Send response back to ESP32
                 await self.send(text_data=json.dumps({
                     'event': result['event'],
                     'data': result['data']
                 }))
                 print(f"[IoT] Sent response to ESP32: {result['event']}")
-                                # Broadcast attendance event to dashboard
-                print(f"[IoT] Broadcasting attendance event to dashboard_classroom_{self.classroom_id}")
-                await self.channel_layer.group_send(
-                    f'dashboard_classroom_{self.classroom_id}',
-                    {
-                        'type': 'attendance_event',
-                        'classroom_id': self.classroom_id,
-                        'event': result['event'],
-                        'data': result['data']
-                    }
-                )
+                # Broadcast attendance event to dashboard (skip for maintenance - no attendance impact)
+                if result['event'] not in ('maintenance_toggle', 'maintenance_blocked'):
+                    await self.channel_layer.group_send(
+                        f'dashboard_classroom_{self.classroom_id}',
+                        {
+                            'type': 'attendance_event',
+                            'classroom_id': self.classroom_id,
+                            'event': result['event'],
+                            'data': result['data']
+                        }
+                    )
             
             # Process power reading if present
             if power is not None:
@@ -248,13 +248,36 @@ class IoTConsumer(AsyncWebsocketConsumer):
         """Process RFID scan and create attendance record.
         
         Uses server time for all timestamps - server is the single source of truth.
-        Supports override RFID cards: when an override card is used, the teacher
-        can take a vacant slot (a scheduled slot where the original teacher didn't show).
+        Card types (checked in order):
+        1. Maintenance RFID - control lights only, no attendance. Blocked when teacher IN.
+        2. Normal/Override RFID - teacher attendance.
         """
-        from core.models import User, Classroom, Schedule, AttendanceSession, OverrideRFID
+        from core.models import User, Classroom, Schedule, AttendanceSession, OverrideRFID, MaintenanceRFID
         
         try:
-            # Find teacher: first by normal RFID, then by override RFID card
+            # 1. Check maintenance card first (staff - lights only, no attendance)
+            maintenance_card = MaintenanceRFID.objects.filter(
+                rfid_uid=rfid_uid, is_active=True
+            ).first()
+            if maintenance_card:
+                classroom = Classroom.objects.get(id=self.classroom_id)
+                today = datetime.now().date()
+                active_session = AttendanceSession.objects.filter(
+                    classroom=classroom,
+                    date=today,
+                    status='IN'
+                ).exists()
+                if active_session:
+                    return {
+                        'event': 'maintenance_blocked',
+                        'data': {'message': 'Teacher present'}
+                    }
+                return {
+                    'event': 'maintenance_toggle',
+                    'data': {'message': 'Toggle relay'}
+                }
+            
+            # 2. Find teacher: first by normal RFID, then by override RFID card
             teacher = None
             is_override_mode = False
             try:

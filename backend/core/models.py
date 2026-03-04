@@ -65,6 +65,21 @@ class Schedule(models.Model):
         return f"{self.teacher} - {self.classroom} ({self.get_day_of_week_display()} {self.start_time}-{self.end_time})"
 
 
+class MaintenanceRFID(models.Model):
+    """RFID cards for staff - control lights only, no attendance. Blocked when teacher is IN."""
+    rfid_uid = models.CharField(max_length=50, unique=True)
+    label = models.CharField(max_length=100, blank=True)  # e.g. "Janitor", "Facilities"
+    is_active = models.BooleanField(default=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    
+    class Meta:
+        db_table = 'maintenance_rfids'
+        ordering = ['label', 'rfid_uid']
+    
+    def __str__(self):
+        return f"Maintenance card {self.rfid_uid}" + (f" ({self.label})" if self.label else "")
+
+
 class OverrideRFID(models.Model):
     """RFID cards that enable substitute/override mode - teacher can take vacant slots."""
     rfid_uid = models.CharField(max_length=50, unique=True)
