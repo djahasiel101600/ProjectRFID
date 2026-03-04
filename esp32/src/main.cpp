@@ -61,7 +61,7 @@ const char *WIFI_SSID = "2.4GHz-Band";
 const char *WIFI_PASSWORD = "#2.4GHz-Band_21";
 
 // WebSocket Server Configuration
-const char *WS_HOST = "192.168.1.7";
+const char *WS_HOST = "192.168.1.11";
 const uint16_t WS_PORT = 8000;
 const char *DEVICE_TOKEN = "ESP32-H3WV263437R";
 const int CLASSROOM_ID = 1;
@@ -77,12 +77,13 @@ const int DAYLIGHT_OFFSET_SEC = 0;
 // Power Monitoring Calibration
 #define AC_FREQUENCY 60              // AC line frequency in Hz (50Hz or 60Hz)
 #define ZMPT101B_SENSITIVITY 483.50f // ZMPT101B sensitivity (calibrate with actual voltage)
-#define CURRENT_SENSITIVITY 0.040f   // ACS724: 40mV per A
-#define SAMPLES_PER_CYCLE 30         // Samples per AC cycle for accurate RMS
-#define MEASUREMENT_CYCLES 5         // Number of cycles to measure (more = more stable)
+#define CURRENT_SENSITIVITY 0.039f   // ACS724: 40mV per A
+#define SAMPLES_PER_CYCLE 70         // Samples per AC cycle for accurate RMS
+#define MEASUREMENT_CYCLES 40         // Number of cycles to measure (more = more stable) for Current Sensor
 #define NOMINAL_VOLTAGE 230.0        // Expected AC voltage (adjust for your region: 110V/220V/230V)
 #define ADC_REFERENCE_VOLTAGE 3.3f   // ESP32 ADC reference voltage
 #define ADC_RESOLUTION 4095.0f       // 12-bit ADC (0-4095)
+#define ADD_AMPERE 0 //Plus/aditional  value to current reading
 
 // ============== PIN DEFINITIONS ==============
 #define RFID_SS_PIN 5
@@ -100,6 +101,7 @@ const int DAYLIGHT_OFFSET_SEC = 0;
 
 // Energy Conservation - Relay Control
 #define RELAY_PIN 14 // 5V Relay - Controls 230V classroom lights
+#define RFID_REINIT_DELAY_MS 80 // Delay after relay before RFID reinit (EMI settle)
 
 // ============== REAL-TIME OPTIMIZATION ==============
 // Reduced intervals for faster response
@@ -157,6 +159,7 @@ StaticJsonDocument<JSON_HEARTBEAT_BUFFER> heartbeatDoc;
 void setupWiFi();
 void setupWebSocket();
 void setupRFID();
+void reinitRFID(); // Re-initialize RFID after relay trigger (fallback for RC522 lock)
 void setupLCD();
 void setupPowerMonitoring();
 void setupNTP();
@@ -682,6 +685,15 @@ void setupRFID()
     displayMessage("RFID Ready", "");
 }
 
+// Re-initialize RFID after relay trigger (fallback for RC522 lock/EMI)
+void reinitRFID()
+{
+    delay(RFID_REINIT_DELAY_MS); // Let relay EMI settle
+    SPI.begin();
+    rfid.PCD_Init();
+    Serial.println("RFID re-initialized (post-relay)");
+}
+
 // ============== RFID READ (OPTIMIZED) ==============
 String readRFID()
 {
@@ -874,7 +886,7 @@ float readRMSCurrent()
     if (current > 50)
         current = 0; // Safety limit for ACS724 50A sensor
 
-    return current;
+    return current + ADD_AMPERE;
 }
 
 // ============== CALCULATE REAL POWER ==============
@@ -1203,17 +1215,20 @@ void setRelay(bool state)
 {
     if (state)
     {
-        digitalWrite(RELAY_PIN, HIGH);
+        // digitalWrite(RELAY_PIN, HIGH);
         Serial.println("Relay ON, LIGHTS ON");
         Serial.println("R1_ON");
     }
     else
     {
-        digitalWrite(RELAY_PIN, LOW);
-        Serial.printf("Relay OFF, LIGHTS OFF");
+        // digitalWrite(RELAY_PIN, LOW);
+        Serial.println("Relay OFF, LIGHTS OFF");
         Serial.println("R1_OFF");
     }
-    Serial.printf("Relay: %s (Lights %s)\n", state ? "ON" : "OFF", state ? "ON" : "OFF");
+    // Serial.println("Relay: %s (Lights %s)\n", state ? "ON" : "OFF", state ? "ON" : "OFF");
+
+    // Fallback: re-initialize RFID after relay trigger (fixes RC522 lock/EMI)
+    reinitRFID();
 }
 
 void turnLightsOn()
