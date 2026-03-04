@@ -1,6 +1,6 @@
 from rest_framework import serializers
 from django.contrib.auth import get_user_model
-from .models import Classroom, Schedule, AttendanceSession, EnergyLog, EnergyAggregation, TeacherEnergyUsage
+from .models import Classroom, Schedule, AttendanceSession, EnergyLog, EnergyAggregation, TeacherEnergyUsage, OverrideRFID
 
 User = get_user_model()
 
@@ -210,6 +210,16 @@ class TeacherEnergyUsageSerializer(serializers.ModelSerializer):
     
     def get_teacher_name(self, obj):
         return obj.teacher.get_full_name() or obj.teacher.username
+
+
+class OverrideRFIDSerializer(serializers.ModelSerializer):
+    """Serializer for override/substitute RFID cards."""
+    teacher_name = serializers.CharField(source='teacher.get_full_name', read_only=True)
+    
+    class Meta:
+        model = OverrideRFID
+        fields = ['id', 'rfid_uid', 'teacher', 'teacher_name', 'is_active', 'created_at']
+        read_only_fields = ['id', 'created_at']
 
 
 class TeacherEnergySummarySerializer(serializers.Serializer):

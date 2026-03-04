@@ -248,13 +248,34 @@ class IoTConsumer(AsyncWebsocketConsumer):
         """Process RFID scan and create attendance record.
         
         Uses server time for all timestamps - server is the single source of truth.
+        Supports override RFID cards: when an override card is used, the teacher
+        can take a vacant slot (a scheduled slot where the original teacher didn't show).
         """
-        from core.models import User, Classroom, Schedule, AttendanceSession
-        from django.db.models import Q
+        from core.models import User, Classroom, Schedule, AttendanceSession, OverrideRFID
         
         try:
-            # Find teacher by RFID
-            teacher = User.objects.get(rfid_uid=rfid_uid, role='teacher', is_active=True)
+            # Find teacher: first by normal RFID, then by override RFID card
+            teacher = None
+            is_override_mode = False
+            try:
+                teacher = User.objects.get(rfid_uid=rfid_uid, role='teacher', is_active=True)
+            except User.DoesNotExist:
+                override_card = OverrideRFID.objects.filter(
+                    rfid_uid=rfid_uid, is_active=True
+                ).select_related('teacher').first()
+                if override_card:
+                    teacher = override_card.teacher
+                    is_override_mode = True
+            
+            if not teacher:
+                return {
+                    'event': 'attendance_error',
+                    'data': {
+                        'message': 'Unknown RFID tag',
+                        'rfid_uid': rfid_uid
+                    }
+                }
+            
             classroom = Classroom.objects.get(id=self.classroom_id)
             
             # Use server time - single source of truth
@@ -375,15 +396,43 @@ class IoTConsumer(AsyncWebsocketConsumer):
                     else:
                         print(f"  (No schedules found for today)")
             
+            # Override mode: if no matching schedule, look for vacant slot (another teacher's slot with no one timed in)
+            if not schedule and is_override_mode:
+                print(f"\n[RFID DEBUG] Override mode: checking for vacant slots in classroom {classroom.name}")
+                time_threshold = (datetime.combine(today, current_time) + timedelta(minutes=15)).time()
+                # Vacant = schedule in this classroom today, current time during slot or within 15 min of start,
+                # and no active session for that schedule today
+                candidate_schedules = Schedule.objects.filter(
+                    classroom=classroom,
+                    day_of_week=day_of_week,
+                    start_time__lte=time_threshold,
+                    end_time__gte=current_time
+                ).order_by('start_time')
+                for cand in candidate_schedules:
+                    # Check if slot is vacant: no one has timed in for this schedule today
+                    occupied = AttendanceSession.objects.filter(
+                        schedule=cand,
+                        date=today,
+                        status='IN'
+                    ).exists()
+                    if not occupied:
+                        schedule = cand
+                        print(f"[RFID DEBUG] FOUND vacant slot: {schedule.start_time} - {schedule.end_time} (was: {schedule.teacher.get_full_name()})")
+                        break
+                if not schedule:
+                    print(f"[RFID DEBUG] No vacant slot found")
+            
             # Create attendance session
             if schedule:
                 # Use naive datetime since USE_TZ=False
                 expected_out = datetime.combine(today, schedule.end_time)
                 status = 'IN'
-                print(f"\n[RFID DEBUG] RESULT: VALID - Creating session with status IN")
+                session_is_override = is_override_mode
+                print(f"\n[RFID DEBUG] RESULT: VALID - Creating session with status IN (override={session_is_override})")
             else:
                 expected_out = None
                 status = 'INVALID'
+                session_is_override = False
                 print(f"\n[RFID DEBUG] RESULT: INVALID - No matching schedule found")
             
             print(f"{'='*60}\n")
@@ -393,10 +442,10 @@ class IoTConsumer(AsyncWebsocketConsumer):
                 classroom=classroom,
                 schedule=schedule,
                 date=today,
-                # time_in uses auto_now_add=True - server sets it automatically
                 expected_out=expected_out,
                 status=status,
-                rfid_uid_used=rfid_uid
+                rfid_uid_used=rfid_uid,
+                is_override=session_is_override
             )
             
             # Schedule real-time timeout if valid session with expected_out
@@ -424,14 +473,6 @@ class IoTConsumer(AsyncWebsocketConsumer):
                 }
             }
             
-        except User.DoesNotExist:
-            return {
-                'event': 'attendance_error',
-                'data': {
-                    'message': 'Unknown RFID tag',
-                    'rfid_uid': rfid_uid
-                }
-            }
         except Exception as e:
             return {
                 'event': 'attendance_error',
