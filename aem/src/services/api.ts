@@ -3,7 +3,9 @@
 import type { 
   User, Classroom, Schedule, AttendanceSession, 
   EnergyLog, EnergyReport, DashboardData, LoginResponse,
-  TeacherEnergyUsage, TeacherEnergySummary, TeacherEnergyByClassroom, TeacherEnergyByDate
+  TeacherEnergyUsage, TeacherEnergySummary, TeacherEnergyByClassroom, TeacherEnergyByDate,
+  OverrideRFID,
+  MaintenanceRFID
 } from '../types';
 
 const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000/api';
@@ -190,6 +192,40 @@ class ApiService {
       method: 'POST',
       body: JSON.stringify({ rfid_uid: rfidUid }),
     });
+  }
+
+  // Override RFID (substitute cards)
+  async getOverrideRFIDs(): Promise<OverrideRFID[]> {
+    const response = await this.request<{ results: OverrideRFID[] } | OverrideRFID[]>('/override-rfids/');
+    return Array.isArray(response) ? response : (response.results || []);
+  }
+
+  async createOverrideRFID(data: { rfid_uid: string; teacher: number }): Promise<OverrideRFID> {
+    return this.request<OverrideRFID>('/override-rfids/', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    });
+  }
+
+  async deleteOverrideRFID(id: number): Promise<void> {
+    await this.request(`/override-rfids/${id}/`, { method: 'DELETE' });
+  }
+
+  // Maintenance RFID (staff - lights control only)
+  async getMaintenanceRFIDs(): Promise<MaintenanceRFID[]> {
+    const response = await this.request<{ results: MaintenanceRFID[] } | MaintenanceRFID[]>('/maintenance-rfids/');
+    return Array.isArray(response) ? response : (response.results || []);
+  }
+
+  async createMaintenanceRFID(data: { rfid_uid: string; label?: string }): Promise<MaintenanceRFID> {
+    return this.request<MaintenanceRFID>('/maintenance-rfids/', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    });
+  }
+
+  async deleteMaintenanceRFID(id: number): Promise<void> {
+    await this.request(`/maintenance-rfids/${id}/`, { method: 'DELETE' });
   }
 
   // Classrooms

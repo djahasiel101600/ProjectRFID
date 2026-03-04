@@ -80,7 +80,7 @@ The system automatically tracks **teacher attendance** via RFID and **classroom 
 - **Attendance Reports** – Filter/sort attendance history
 - **Energy Reports** – Hourly/daily/monthly energy aggregation
 - **Teacher Energy** – Per-teacher energy usage
-- **Admin** – Teachers, RFID, classrooms, schedules, RFID scan mode
+- **Admin** – Teachers, RFID, classrooms, schedules, Override Cards, Maintenance Cards (staff light control), RFID scan mode
 
 ---
 
@@ -89,17 +89,21 @@ The system automatically tracks **teacher attendance** via RFID and **classroom 
 ### 3.1 Attendance Flow (RFID Time-In)
 
 ```
-Teacher taps RFID card
+User taps RFID card
     ↓
 ESP32 reads UID → sends JSON over WebSocket
     ↓
 IoTConsumer.receive() → process_rfid()
     ↓
-Look up User by rfid_uid
-Check Schedule (day_of_week, start_time, end_time, 15-min window)
+1. Check MaintenanceRFID first → if match: no attendance. If teacher IN → maintenance_blocked. Else → maintenance_toggle (relay)
+2. Else: Look up teacher: User by rfid_uid, OR OverrideRFID by rfid_uid (override mode)
     ↓
 If already IN → manual checkout (MANUAL_OUT)
-If valid schedule → create AttendanceSession (status=IN), schedule Celery timeout
+    ↓
+Check Schedule: teacher's own schedule (day, time, 15-min window)
+If no match AND override mode → look for VACANT slot (another teacher's slot with no one timed in)
+    ↓
+If valid schedule or vacant slot → create AttendanceSession (status=IN, is_override if from override card), schedule Celery timeout
 If no schedule → create AttendanceSession (status=INVALID)
     ↓
 Broadcast to DashboardConsumer (attendance_event)
@@ -174,16 +178,20 @@ Frontend updates power display in real time
 - **User** – Admin or teacher; teachers have `rfid_uid`
 - **Classroom** – `name`, `device_id`, `device_token`
 - **Schedule** – `teacher`, `classroom`, `day_of_week`, `start_time`, `end_time`, `subject`
-- **AttendanceSession** – `teacher`, `classroom`, `schedule`, `date`, `time_in`, `time_out`, `expected_out`, `status` (IN, MANUAL_OUT, AUTO_OUT, INVALID)
+- **MaintenanceRFID** – `rfid_uid`, `label`; staff cards for lights control only, no attendance. Blocked when teacher IN.
+- **OverrideRFID** – `rfid_uid`, `teacher`; cards that enable substitute/override mode (teacher can take vacant slots)
+- **AttendanceSession** – `teacher`, `classroom`, `schedule`, `date`, `time_in`, `time_out`, `expected_out`, `status` (IN, MANUAL_OUT, AUTO_OUT, INVALID), `is_override` (true if session started via override card)
 - **EnergyLog** – `classroom`, `voltage`, `current`, `watts`, `timestamp`
 - **EnergyAggregation** – Pre-aggregated kWh by hour/day/month
 - **TeacherEnergyUsage** – Energy attributed to each attendance session (computed after AUTO_OUT)
 
 ### 5.2 Attendance Rules
 
+- **Maintenance RFID**: Staff card. Control lights only (toggle relay). No attendance created. **Blocked** when a teacher has an active session (status=IN) in that classroom. ESP32 receives `maintenance_toggle` or `maintenance_blocked`.
 - Attendance is **time-in only**; no explicit RFID time-out.
 - **Valid** if RFID scanned during schedule or within 15 minutes of `start_time`.
-- **Invalid** if scanned outside schedule (still logged).
+- **Override/Substitute mode**: When an **Override RFID** card is used, if the teacher has no matching schedule, the system checks for **vacant slots** (another teacher's scheduled slot in that classroom where no one has timed in). If found, the teacher can take that slot; session is created with `is_override=True`.
+- **Invalid** if scanned outside schedule and (no override card or no vacant slot); still logged.
 - **Manual checkout**: second RFID tap during active session → MANUAL_OUT.
 - **Auto-timeout**: session ends at `expected_out` via Celery or periodic task.
 - One active session per teacher per classroom per day.
@@ -195,6 +203,8 @@ Frontend updates power display in real time
 | Area | Endpoints |
 |------|-----------|
 | Auth | `POST /api/auth/login/`, `POST /api/auth/logout/` |
+| Override RFID | `GET/POST /api/override-rfids/`, `DELETE /api/override-rfids/{id}/` |
+| Maintenance RFID | `GET/POST /api/maintenance-rfids/`, `DELETE /api/maintenance-rfids/{id}/` |
 | Users | CRUD, `POST /api/users/{id}/assign_rfid/` |
 | Classrooms | CRUD, `GET /api/classrooms/{id}/current_status/` |
 | Schedules | CRUD, `GET /api/schedules/today/` |
@@ -243,7 +253,34 @@ Shared volumes: `backend_data` for SQLite, `backend_static` for static files.
 
 ---
 
-## 10. Security
+## 10. Admin Maintenance Cards (Staff Light Control)
+
+Staff RFID cards that control classroom lights only. No attendance is recorded.
+
+1. Admin goes to **Admin → Maintenance Cards** tab.
+2. Add card: scan or type RFID UID, optional label (e.g. "Janitor").
+3. When staff taps the card:
+   - **If no teacher is IN** → Relay toggles (lights on/off). ESP32 shows "Lights ON" or "Lights OFF".
+   - **If a teacher is IN** → Blocked. ESP32 shows "Teacher present", red LED, error beep.
+4. No dashboard broadcast (maintenance does not affect attendance).
+
+---
+
+## 11. Admin Override Cards (Substitute Mode)
+
+Override RFID cards allow teachers to take **vacant slots** when the scheduled teacher doesn't show up.
+
+1. Admin goes to **Admin → Override Cards** tab.
+2. Click **+ Add Override Card**, select a teacher, and scan or type the RFID UID.
+3. That physical card is now an "override" card for that teacher.
+4. When the teacher uses this card (instead of their normal RFID) and they have no matching schedule, the system looks for vacant slots in the classroom. A vacant slot = a schedule where no one has timed in today.
+5. If found, the teacher can take the slot; session is created with `is_override=True` for reporting.
+
+**Example:** Teacher A (8:00–9:00) doesn't show. Teacher B (9:00–10:30) has an override card. Teacher B scans the override card at 8:15 in the classroom → system finds vacant 8:00–9:00 slot → Teacher B gets in, session uses 9:00 as `expected_out` for auto-timeout.
+
+---
+
+## 12. Security
 
 - ESP32: authenticated via `device_token` on WebSocket connect.
 - Web app: JWT login; REST API uses Bearer token.
@@ -251,7 +288,7 @@ Shared volumes: `backend_data` for SQLite, `backend_static` for static files.
 
 ---
 
-## 11. Directory Structure
+## 13. Directory Structure
 
 ```
 ProjectRFID/

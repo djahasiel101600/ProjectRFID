@@ -74,6 +74,23 @@ export interface EnergyReport {
   reading_count: number;
 }
 
+export interface MaintenanceRFID {
+  id: number;
+  rfid_uid: string;
+  label: string;
+  is_active: boolean;
+  created_at: string;
+}
+
+export interface OverrideRFID {
+  id: number;
+  rfid_uid: string;
+  teacher: number;
+  teacher_name: string;
+  is_active: boolean;
+  created_at: string;
+}
+
 export interface Teacher {
   id: number,
   username: string,

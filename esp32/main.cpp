@@ -150,6 +150,9 @@ char statusMessage[17] = "Ready"; // Fixed buffer for LCD
 // Current sensor calibration
 float quiescentVoltage = 2.5; // Zero-current voltage (calibrated at startup)
 
+// Relay state (for maintenance toggle)
+bool lightsOn = false;
+
 // JSON document pools (reuse to avoid allocation)
 StaticJsonDocument<JSON_RFID_BUFFER> rfidDoc;
 StaticJsonDocument<JSON_POWER_BUFFER> powerDoc;
@@ -191,6 +194,7 @@ void beepPattern(int times, int onMs, int offMs);
 void setRelay(bool state);
 void turnLightsOn();
 void turnLightsOff();
+void toggleLights();  // Maintenance mode - flip relay state
 
 // Scan mode functions
 void enterScanMode();
@@ -510,8 +514,20 @@ void webSocketEvent(WStype_t type, uint8_t *payload, size_t length)
                         Serial.print("[DEBUG] Error message: ");
                         Serial.println(message ? message : "NULL");
                         displayMessage("Error!", message ? message : "Unknown");
-                        // Error feedback
                         feedbackPattern(LED_RED_PIN, 3, 500, 500);
+                    }
+                    else if (strcmp(event, "maintenance_toggle") == 0)
+                    {
+                        Serial.println("[Debug] Maintenance - toggle lights");
+                        toggleLights();
+                        displayMessage("Maintenance", lightsOn ? "Lights ON" : "Lights OFF");
+                        feedbackPattern(LED_GREEN_PIN, 2, 100, 100);
+                    }
+                    else if (strcmp(event, "maintenance_blocked") == 0)
+                    {
+                        Serial.println("[Debug] Maintenance blocked - teacher present");
+                        displayMessage("Blocked", "Teacher present");
+                        feedbackPattern(LED_RED_PIN, 3, 400, 400);
                     }
                     else
                     {
@@ -1206,6 +1222,7 @@ void handleTimeoutFinal()
 // Control relay for classroom lights (Energy Conservation)
 void setRelay(bool state)
 {
+    lightsOn = state;
     if (state)
     {
         // digitalWrite(RELAY_PIN, HIGH);
@@ -1218,10 +1235,16 @@ void setRelay(bool state)
         Serial.println("Relay OFF, LIGHTS OFF");
         Serial.println("R1_OFF");
     }
-    // Serial.println("Relay: %s (Lights %s)\n", state ? "ON" : "OFF", state ? "ON" : "OFF");
 
     // Fallback: re-initialize RFID after relay trigger (fixes RC522 lock/EMI)
     reinitRFID();
+}
+
+void toggleLights()
+{
+    lightsOn = !lightsOn;
+    setRelay(lightsOn);
+    Serial.println(lightsOn ? "[MAINT] Lights turned ON" : "[MAINT] Lights turned OFF");
 }
 
 void turnLightsOn()

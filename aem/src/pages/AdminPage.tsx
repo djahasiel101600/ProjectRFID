@@ -19,7 +19,7 @@ import {
   TableHeader,
   TableRow,
 } from "../components/ui/table";
-import type { User, Classroom, Schedule } from "../types";
+import type { User, Classroom, Schedule, OverrideRFID, MaintenanceRFID } from "../types";
 import { useRFIDScanner } from "../hooks/useRFIDScanner";
 
 // Modal Component
@@ -1360,6 +1360,386 @@ function SchedulesTab() {
   );
 }
 
+// ============== OVERRIDE CARDS TAB ==============
+function OverrideCardsTab() {
+  const [overrideCards, setOverrideCards] = useState<OverrideRFID[]>([]);
+  const [teachers, setTeachers] = useState<User[]>([]);
+  const [classrooms, setClassrooms] = useState<Classroom[]>([]);
+  const [isLoading, setIsLoading] = useState(true);
+  const [showForm, setShowForm] = useState(false);
+  const [alert, setAlert] = useState<{
+    type: "success" | "error";
+    message: string;
+  } | null>(null);
+  const [formData, setFormData] = useState({ rfid_uid: "", teacher: "" });
+  const { isScanning, scannedRFID, scanError, startScan, clearScan } = useRFIDScanner();
+
+  useEffect(() => {
+    loadData();
+  }, []);
+
+  useEffect(() => {
+    if (scannedRFID) {
+      setFormData((prev) => ({ ...prev, rfid_uid: scannedRFID }));
+      setAlert({ type: "success", message: `RFID scanned: ${scannedRFID}` });
+      clearScan();
+    }
+  }, [scannedRFID, clearScan]);
+
+  useEffect(() => {
+    if (scanError) setAlert({ type: "error", message: scanError });
+  }, [scanError]);
+
+  const loadData = async () => {
+    try {
+      setIsLoading(true);
+      const [cards, teachersData, classroomsData] = await Promise.all([
+        apiService.getOverrideRFIDs(),
+        apiService.getTeachers(),
+        apiService.getClassrooms(),
+      ]);
+      setOverrideCards(cards);
+      setTeachers(teachersData);
+      setClassrooms(classroomsData.filter((c) => c.is_active));
+    } catch (err) {
+      setAlert({ type: "error", message: "Failed to load override cards" });
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!formData.teacher || !formData.rfid_uid.trim()) {
+      setAlert({ type: "error", message: "Select a teacher and scan or enter RFID UID" });
+      return;
+    }
+    try {
+      await apiService.createOverrideRFID({
+        rfid_uid: formData.rfid_uid.trim().toUpperCase(),
+        teacher: parseInt(formData.teacher),
+      });
+      setFormData({ rfid_uid: "", teacher: "" });
+      setShowForm(false);
+      setAlert({ type: "success", message: "Override card assigned successfully" });
+      loadData();
+    } catch (err: any) {
+      setAlert({
+        type: "error",
+        message: err.message || "Failed to add override card",
+      });
+    }
+  };
+
+  const handleDelete = async (id: number) => {
+    if (confirm("Remove this override card? The teacher will no longer be able to use it for substitute mode.")) {
+      try {
+        await apiService.deleteOverrideRFID(id);
+        setAlert({ type: "success", message: "Override card removed" });
+        loadData();
+      } catch (err: any) {
+        setAlert({ type: "error", message: err.message || "Failed to remove override card" });
+      }
+    }
+  };
+
+  return (
+    <div className="space-y-4">
+      {alert && (
+        <Alert type={alert.type} message={alert.message} onClose={() => setAlert(null)} />
+      )}
+      <div className="flex justify-between items-center">
+        <div>
+          <h2 className="text-lg font-semibold">Override / Substitute Cards</h2>
+          <p className="text-sm text-gray-500">
+            Cards that allow teachers to take vacant slots when the scheduled teacher doesn&apos;t show up
+          </p>
+        </div>
+        <Button onClick={() => setShowForm(!showForm)}>
+          {showForm ? "Cancel" : "+ Add Override Card"}
+        </Button>
+      </div>
+      {showForm && (
+        <Card>
+          <CardHeader>
+            <CardTitle>Register Override Card</CardTitle>
+            <p className="text-sm text-gray-500">
+              Assign an RFID card to a teacher. When they use this card, they can take any vacant classroom slot.
+            </p>
+          </CardHeader>
+          <CardContent>
+            <form onSubmit={handleSubmit} className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div>
+                <Label htmlFor="override_teacher">Teacher</Label>
+                <Select
+                  id="override_teacher"
+                  value={formData.teacher}
+                  onChange={(e: React.ChangeEvent<HTMLSelectElement>) =>
+                    setFormData({ ...formData, teacher: e.target.value })
+                  }
+                  required
+                >
+                  <option value="">Select Teacher</option>
+                  {teachers.map((t: User) => (
+                    <option key={t.id} value={t.id}>
+                      {t.first_name} {t.last_name}
+                    </option>
+                  ))}
+                </Select>
+              </div>
+              <div>
+                <Label htmlFor="override_rfid">RFID UID</Label>
+                <div className="flex gap-2">
+                  <Input
+                    id="override_rfid"
+                    value={formData.rfid_uid}
+                    onChange={(e: React.ChangeEvent<HTMLInputElement>) =>
+                      setFormData({ ...formData, rfid_uid: e.target.value.toUpperCase() })
+                    }
+                    placeholder="Scan or type RFID UID"
+                    className="flex-1"
+                  />
+                  <Button
+                    type="button"
+                    variant="outline"
+                    onClick={() => {
+                      if (classrooms.length > 0) startScan(classrooms[0].id);
+                      else setAlert({ type: "error", message: "No active classrooms. Add a classroom first." });
+                    }}
+                    disabled={isScanning || classrooms.length === 0}
+                  >
+                    {isScanning ? "Scanning…" : "Scan"}
+                  </Button>
+                </div>
+                {isScanning && (
+                  <p className="text-xs text-blue-600 mt-1 animate-pulse">Present RFID tag to scanner…</p>
+                )}
+              </div>
+              <div className="md:col-span-2">
+                <Button type="submit">Add Override Card</Button>
+              </div>
+            </form>
+          </CardContent>
+        </Card>
+      )}
+      <Card>
+        <CardContent className="pt-6">
+          {isLoading ? (
+            <div className="py-8 text-center text-gray-500">Loading…</div>
+          ) : overrideCards.length === 0 ? (
+            <div className="py-8 text-center text-gray-500">
+              No override cards. Add one to let teachers use substitute mode for vacant slots.
+            </div>
+          ) : (
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead>RFID UID</TableHead>
+                  <TableHead>Teacher</TableHead>
+                  <TableHead className="text-right">Actions</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {overrideCards.map((card) => (
+                  <TableRow key={card.id}>
+                    <TableCell>
+                      <code className="bg-gray-100 px-2 py-1 rounded text-sm">{card.rfid_uid}</code>
+                    </TableCell>
+                    <TableCell>{card.teacher_name}</TableCell>
+                    <TableCell className="text-right">
+                      <Button variant="destructive" size="sm" onClick={() => handleDelete(card.id)}>
+                        Remove
+                      </Button>
+                    </TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+          )}
+        </CardContent>
+      </Card>
+    </div>
+  );
+}
+
+// ============== MAINTENANCE CARDS TAB ==============
+function MaintenanceCardsTab() {
+  const [cards, setCards] = useState<MaintenanceRFID[]>([]);
+  const [classrooms, setClassrooms] = useState<Classroom[]>([]);
+  const [isLoading, setIsLoading] = useState(true);
+  const [showForm, setShowForm] = useState(false);
+  const [alert, setAlert] = useState<{ type: "success" | "error"; message: string } | null>(null);
+  const [formData, setFormData] = useState({ rfid_uid: "", label: "" });
+  const { isScanning, scannedRFID, scanError, startScan, clearScan } = useRFIDScanner();
+
+  useEffect(() => { loadData(); }, []);
+  useEffect(() => {
+    if (scannedRFID) {
+      setFormData((prev) => ({ ...prev, rfid_uid: scannedRFID }));
+      setAlert({ type: "success", message: `RFID scanned: ${scannedRFID}` });
+      clearScan();
+    }
+  }, [scannedRFID, clearScan]);
+  useEffect(() => { if (scanError) setAlert({ type: "error", message: scanError }); }, [scanError]);
+
+  const loadData = async () => {
+    try {
+      setIsLoading(true);
+      const [cardsData, classroomsData] = await Promise.all([
+        apiService.getMaintenanceRFIDs(),
+        apiService.getClassrooms(),
+      ]);
+      setCards(cardsData);
+      setClassrooms(classroomsData.filter((c) => c.is_active));
+    } catch (err) {
+      setAlert({ type: "error", message: "Failed to load maintenance cards" });
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!formData.rfid_uid.trim()) {
+      setAlert({ type: "error", message: "Scan or enter RFID UID" });
+      return;
+    }
+    try {
+      await apiService.createMaintenanceRFID({
+        rfid_uid: formData.rfid_uid.trim().toUpperCase(),
+        label: formData.label.trim() || undefined,
+      });
+      setFormData({ rfid_uid: "", label: "" });
+      setShowForm(false);
+      setAlert({ type: "success", message: "Maintenance card added" });
+      loadData();
+    } catch (err: unknown) {
+      setAlert({ type: "error", message: err instanceof Error ? err.message : "Failed to add card" });
+    }
+  };
+
+  const handleDelete = async (id: number) => {
+    if (confirm("Remove this maintenance card? Staff will no longer be able to use it to control lights.")) {
+      try {
+        await apiService.deleteMaintenanceRFID(id);
+        setAlert({ type: "success", message: "Maintenance card removed" });
+        loadData();
+      } catch (err: unknown) {
+        setAlert({ type: "error", message: err instanceof Error ? err.message : "Failed to remove card" });
+      }
+    }
+  };
+
+  return (
+    <div className="space-y-4">
+      {alert && <Alert type={alert.type} message={alert.message} onClose={() => setAlert(null)} />}
+      <div className="flex justify-between items-center">
+        <div>
+          <h2 className="text-lg font-semibold">Maintenance Cards</h2>
+          <p className="text-sm text-gray-500">
+            Staff cards to turn lights on/off. No attendance recorded. Blocked when a teacher is in the room.
+          </p>
+        </div>
+        <Button onClick={() => setShowForm(!showForm)}>
+          {showForm ? "Cancel" : "+ Add Maintenance Card"}
+        </Button>
+      </div>
+      {showForm && (
+        <Card>
+          <CardHeader>
+            <CardTitle>Register Maintenance Card</CardTitle>
+            <p className="text-sm text-gray-500">
+              Staff can use this card to toggle classroom lights. Does not create attendance. Blocked if teacher is present.
+            </p>
+          </CardHeader>
+          <CardContent>
+            <form onSubmit={handleSubmit} className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div>
+                <Label htmlFor="maint_rfid">RFID UID</Label>
+                <div className="flex gap-2">
+                  <Input
+                    id="maint_rfid"
+                    value={formData.rfid_uid}
+                    onChange={(e: React.ChangeEvent<HTMLInputElement>) =>
+                      setFormData({ ...formData, rfid_uid: e.target.value.toUpperCase() })
+                    }
+                    placeholder="Scan or type RFID UID"
+                    className="flex-1"
+                  />
+                  <Button
+                    type="button"
+                    variant="outline"
+                    onClick={() => {
+                      if (classrooms.length > 0) startScan(classrooms[0].id);
+                      else setAlert({ type: "error", message: "No active classrooms. Add a classroom first." });
+                    }}
+                    disabled={isScanning || classrooms.length === 0}
+                  >
+                    {isScanning ? "Scanning…" : "Scan"}
+                  </Button>
+                </div>
+                {isScanning && (
+                  <p className="text-xs text-blue-600 mt-1 animate-pulse">Present RFID tag to scanner…</p>
+                )}
+              </div>
+              <div>
+                <Label htmlFor="maint_label">Label (optional)</Label>
+                <Input
+                  id="maint_label"
+                  value={formData.label}
+                  onChange={(e: React.ChangeEvent<HTMLInputElement>) =>
+                    setFormData({ ...formData, label: e.target.value })
+                  }
+                  placeholder="e.g., Janitor, Facilities"
+                />
+              </div>
+              <div className="md:col-span-2">
+                <Button type="submit">Add Maintenance Card</Button>
+              </div>
+            </form>
+          </CardContent>
+        </Card>
+      )}
+      <Card>
+        <CardContent className="pt-6">
+          {isLoading ? (
+            <div className="py-8 text-center text-gray-500">Loading…</div>
+          ) : cards.length === 0 ? (
+            <div className="py-8 text-center text-gray-500">
+              No maintenance cards. Add one for staff to control lights.
+            </div>
+          ) : (
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead>RFID UID</TableHead>
+                  <TableHead>Label</TableHead>
+                  <TableHead className="text-right">Actions</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {cards.map((card) => (
+                  <TableRow key={card.id}>
+                    <TableCell>
+                      <code className="bg-gray-100 px-2 py-1 rounded text-sm">{card.rfid_uid}</code>
+                    </TableCell>
+                    <TableCell>{card.label || "—"}</TableCell>
+                    <TableCell className="text-right">
+                      <Button variant="destructive" size="sm" onClick={() => handleDelete(card.id)}>
+                        Remove
+                      </Button>
+                    </TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+          )}
+        </CardContent>
+      </Card>
+    </div>
+  );
+}
+
 // ============== MAIN ADMIN PAGE ==============
 export function AdminPage() {
   const [activeTab, setActiveTab] = useState("Teachers");
@@ -1374,7 +1754,7 @@ export function AdminPage() {
       </div>
 
       <Tabs
-        tabs={["Teachers", "Classrooms", "Schedules"]}
+        tabs={["Teachers", "Classrooms", "Schedules", "Override Cards", "Maintenance Cards"]}
         activeTab={activeTab}
         onTabChange={setActiveTab}
       />
@@ -1382,6 +1762,8 @@ export function AdminPage() {
       {activeTab === "Teachers" && <TeachersTab />}
       {activeTab === "Classrooms" && <ClassroomsTab />}
       {activeTab === "Schedules" && <SchedulesTab />}
+      {activeTab === "Override Cards" && <OverrideCardsTab />}
+      {activeTab === "Maintenance Cards" && <MaintenanceCardsTab />}
     </div>
   );
 }
