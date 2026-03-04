@@ -19,7 +19,7 @@ import {
   TableHeader,
   TableRow,
 } from "../components/ui/table";
-import type { User, Classroom, Schedule } from "../types";
+import type { User, Classroom, Schedule, OverrideRFID, MaintenanceRFID } from "../types";
 import { useRFIDScanner } from "../hooks/useRFIDScanner";
 
 // Modal Component
@@ -131,11 +131,9 @@ function TeachersTab() {
     message: string;
   } | null>(null);
   const [formData, setFormData] = useState({
-    username: "",
     email: "",
     first_name: "",
     last_name: "",
-    password: "",
     rfid_uid: "",
   });
 
@@ -151,7 +149,7 @@ function TeachersTab() {
   // Handle scanned RFID
   useEffect(() => {
     if (scannedRFID) {
-      setFormData((prev) => ({ ...prev, rfid_uid: scannedRFID }));
+      setFormData((prev: typeof formData) => ({ ...prev, rfid_uid: scannedRFID }));
       setAlert({ type: "success", message: `RFID scanned: ${scannedRFID}` });
       clearScan();
     }
@@ -187,11 +185,9 @@ function TeachersTab() {
 
   const resetForm = () => {
     setFormData({
-      username: "",
       email: "",
       first_name: "",
       last_name: "",
-      password: "",
       rfid_uid: "",
     });
   };
@@ -199,7 +195,7 @@ function TeachersTab() {
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     try {
-      await apiService.createUser({ ...formData, role: "teacher" });
+      await apiService.createTeacher(formData);
       resetForm();
       setShowForm(false);
       setAlert({ type: "success", message: "Teacher created successfully" });
@@ -371,23 +367,12 @@ function TeachersTab() {
           <CardContent>
             <form onSubmit={handleSubmit} className="grid grid-cols-2 gap-4">
               <div>
-                <Label htmlFor="username">Username</Label>
-                <Input
-                  id="username"
-                  value={formData.username}
-                  onChange={(e) =>
-                    setFormData({ ...formData, username: e.target.value })
-                  }
-                  required
-                />
-              </div>
-              <div>
                 <Label htmlFor="email">Email</Label>
                 <Input
                   id="email"
                   type="email"
                   value={formData.email}
-                  onChange={(e) =>
+                  onChange={(e: React.ChangeEvent<HTMLInputElement>) =>
                     setFormData({ ...formData, email: e.target.value })
                   }
                   required
@@ -398,7 +383,7 @@ function TeachersTab() {
                 <Input
                   id="first_name"
                   value={formData.first_name}
-                  onChange={(e) =>
+                  onChange={(e: React.ChangeEvent<HTMLInputElement>) =>
                     setFormData({ ...formData, first_name: e.target.value })
                   }
                   required
@@ -409,23 +394,10 @@ function TeachersTab() {
                 <Input
                   id="last_name"
                   value={formData.last_name}
-                  onChange={(e) =>
+                  onChange={(e: React.ChangeEvent<HTMLInputElement>) =>
                     setFormData({ ...formData, last_name: e.target.value })
                   }
                   required
-                />
-              </div>
-              <div>
-                <Label htmlFor="password">Password</Label>
-                <Input
-                  id="password"
-                  type="password"
-                  value={formData.password}
-                  onChange={(e) =>
-                    setFormData({ ...formData, password: e.target.value })
-                  }
-                  required
-                  minLength={8}
                 />
               </div>
               <div>
@@ -434,7 +406,7 @@ function TeachersTab() {
                   <Input
                     id="rfid_uid"
                     value={formData.rfid_uid}
-                    onChange={(e) =>
+                    onChange={(e: React.ChangeEvent<HTMLInputElement>) =>
                       setFormData({
                         ...formData,
                         rfid_uid: e.target.value.toUpperCase(),
@@ -507,7 +479,7 @@ function TeachersTab() {
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {teachers.map((teacher) => (
+                {teachers.map((teacher: User) => (
                   <TableRow key={teacher.id}>
                     <TableCell className="font-medium">
                       {teacher.first_name} {teacher.last_name}
@@ -527,7 +499,7 @@ function TeachersTab() {
                     </TableCell>
                     <TableCell>
                       <Badge
-                        variant={teacher.is_active ? "success" : "secondary"}
+                        variant={(teacher.is_active ? "success" : "secondary") as "success" | "secondary"}
                         className="cursor-pointer"
                         onClick={() => handleToggleActive(teacher)}
                       >
@@ -694,7 +666,11 @@ function ClassroomsTab() {
     setFormData({ ...formData, device_token: token });
   };
 
-  const copyToken = (token: string) => {
+  const copyToken = (token: string | null | undefined) => {
+    if (!token) {
+      setAlert({ type: "error", message: "Token not available" });
+      return;
+    }
     navigator.clipboard.writeText(token);
     setAlert({ type: "success", message: "Token copied to clipboard" });
   };
@@ -739,7 +715,7 @@ function ClassroomsTab() {
               <Label>Device Token (Read-only)</Label>
               <div className="flex gap-2">
                 <Input
-                  value={editingClassroom.device_token}
+                  value={editingClassroom.device_token ?? ""}
                   readOnly
                   className="bg-gray-50"
                 />
@@ -803,7 +779,7 @@ function ClassroomsTab() {
                 <Input
                   id="name"
                   value={formData.name}
-                  onChange={(e) =>
+                  onChange={(e: React.ChangeEvent<HTMLInputElement>) =>
                     setFormData({ ...formData, name: e.target.value })
                   }
                   placeholder="e.g., Room 101"
@@ -815,7 +791,7 @@ function ClassroomsTab() {
                 <Input
                   id="device_id"
                   value={formData.device_id}
-                  onChange={(e) =>
+                  onChange={(e: React.ChangeEvent<HTMLInputElement>) =>
                     setFormData({ ...formData, device_id: e.target.value })
                   }
                   placeholder="e.g., ESP32-ROOM-01"
@@ -828,7 +804,7 @@ function ClassroomsTab() {
                   <Input
                     id="device_token"
                     value={formData.device_token}
-                    onChange={(e) =>
+                    onChange={(e: React.ChangeEvent<HTMLInputElement>) =>
                       setFormData({ ...formData, device_token: e.target.value })
                     }
                     placeholder="Click Generate to create a token"
@@ -877,7 +853,7 @@ function ClassroomsTab() {
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {classrooms.map((classroom) => (
+                {classrooms.map((classroom: Classroom) => (
                   <TableRow key={classroom.id}>
                     <TableCell className="font-medium">
                       {classroom.name}
@@ -1115,7 +1091,7 @@ function SchedulesTab() {
                 required
               >
                 <option value="">Select Teacher</option>
-                {teachers.map((t) => (
+                {teachers.map((t: User) => (
                   <option key={t.id} value={t.id}>
                     {t.first_name} {t.last_name}
                   </option>
@@ -1131,7 +1107,7 @@ function SchedulesTab() {
                 required
               >
                 <option value="">Select Classroom</option>
-                {classrooms.map((c) => (
+                {classrooms.map((c: Classroom) => (
                   <option key={c.id} value={c.id}>
                     {c.name}
                   </option>
@@ -1221,13 +1197,13 @@ function SchedulesTab() {
                 <Select
                   id="teacher"
                   value={formData.teacher}
-                  onChange={(e) =>
+                  onChange={(e: React.ChangeEvent<HTMLSelectElement>) =>
                     setFormData({ ...formData, teacher: e.target.value })
                   }
                   required
                 >
                   <option value="">Select Teacher</option>
-                  {teachers.map((t) => (
+                  {teachers.map((t: User) => (
                     <option key={t.id} value={t.id}>
                       {t.first_name} {t.last_name}
                     </option>
@@ -1239,13 +1215,13 @@ function SchedulesTab() {
                 <Select
                   id="classroom"
                   value={formData.classroom}
-                  onChange={(e) =>
+                  onChange={(e: React.ChangeEvent<HTMLSelectElement>) =>
                     setFormData({ ...formData, classroom: e.target.value })
                   }
                   required
                 >
                   <option value="">Select Classroom</option>
-                  {classrooms.map((c) => (
+                  {classrooms.map((c: Classroom) => (
                     <option key={c.id} value={c.id}>
                       {c.name}
                     </option>
@@ -1257,7 +1233,7 @@ function SchedulesTab() {
                 <Select
                   id="day_of_week"
                   value={formData.day_of_week}
-                  onChange={(e) =>
+                  onChange={(e: React.ChangeEvent<HTMLSelectElement>) =>
                     setFormData({ ...formData, day_of_week: e.target.value })
                   }
                   required
@@ -1274,7 +1250,7 @@ function SchedulesTab() {
                 <Input
                   id="subject"
                   value={formData.subject}
-                  onChange={(e) =>
+                  onChange={(e: React.ChangeEvent<HTMLInputElement>) =>
                     setFormData({ ...formData, subject: e.target.value })
                   }
                   placeholder="e.g., Mathematics"
@@ -1286,7 +1262,7 @@ function SchedulesTab() {
                   id="start_time"
                   type="time"
                   value={formData.start_time}
-                  onChange={(e) =>
+                  onChange={(e: React.ChangeEvent<HTMLInputElement>) =>
                     setFormData({ ...formData, start_time: e.target.value })
                   }
                   required
@@ -1298,7 +1274,7 @@ function SchedulesTab() {
                   id="end_time"
                   type="time"
                   value={formData.end_time}
-                  onChange={(e) =>
+                  onChange={(e: React.ChangeEvent<HTMLInputElement>) =>
                     setFormData({ ...formData, end_time: e.target.value })
                   }
                   required
@@ -1335,14 +1311,16 @@ function SchedulesTab() {
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {schedules.map((schedule) => (
+                {schedules.map((schedule: Schedule) => (
                   <TableRow key={schedule.id}>
                     <TableCell className="font-medium">
                       {schedule.teacher_name}
                     </TableCell>
                     <TableCell>{schedule.classroom_name}</TableCell>
                     <TableCell>
-                      <Badge variant="outline">{schedule.day_name}</Badge>
+                      <Badge variant="outline">
+                        {schedule.day_name}
+                      </Badge>
                     </TableCell>
                     <TableCell>
                       {schedule.start_time?.slice(0, 5)} -{" "}
@@ -1382,6 +1360,386 @@ function SchedulesTab() {
   );
 }
 
+// ============== OVERRIDE CARDS TAB ==============
+function OverrideCardsTab() {
+  const [overrideCards, setOverrideCards] = useState<OverrideRFID[]>([]);
+  const [teachers, setTeachers] = useState<User[]>([]);
+  const [classrooms, setClassrooms] = useState<Classroom[]>([]);
+  const [isLoading, setIsLoading] = useState(true);
+  const [showForm, setShowForm] = useState(false);
+  const [alert, setAlert] = useState<{
+    type: "success" | "error";
+    message: string;
+  } | null>(null);
+  const [formData, setFormData] = useState({ rfid_uid: "", teacher: "" });
+  const { isScanning, scannedRFID, scanError, startScan, clearScan } = useRFIDScanner();
+
+  useEffect(() => {
+    loadData();
+  }, []);
+
+  useEffect(() => {
+    if (scannedRFID) {
+      setFormData((prev) => ({ ...prev, rfid_uid: scannedRFID }));
+      setAlert({ type: "success", message: `RFID scanned: ${scannedRFID}` });
+      clearScan();
+    }
+  }, [scannedRFID, clearScan]);
+
+  useEffect(() => {
+    if (scanError) setAlert({ type: "error", message: scanError });
+  }, [scanError]);
+
+  const loadData = async () => {
+    try {
+      setIsLoading(true);
+      const [cards, teachersData, classroomsData] = await Promise.all([
+        apiService.getOverrideRFIDs(),
+        apiService.getTeachers(),
+        apiService.getClassrooms(),
+      ]);
+      setOverrideCards(cards);
+      setTeachers(teachersData);
+      setClassrooms(classroomsData.filter((c) => c.is_active));
+    } catch (err) {
+      setAlert({ type: "error", message: "Failed to load override cards" });
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!formData.teacher || !formData.rfid_uid.trim()) {
+      setAlert({ type: "error", message: "Select a teacher and scan or enter RFID UID" });
+      return;
+    }
+    try {
+      await apiService.createOverrideRFID({
+        rfid_uid: formData.rfid_uid.trim().toUpperCase(),
+        teacher: parseInt(formData.teacher),
+      });
+      setFormData({ rfid_uid: "", teacher: "" });
+      setShowForm(false);
+      setAlert({ type: "success", message: "Override card assigned successfully" });
+      loadData();
+    } catch (err: any) {
+      setAlert({
+        type: "error",
+        message: err.message || "Failed to add override card",
+      });
+    }
+  };
+
+  const handleDelete = async (id: number) => {
+    if (confirm("Remove this override card? The teacher will no longer be able to use it for substitute mode.")) {
+      try {
+        await apiService.deleteOverrideRFID(id);
+        setAlert({ type: "success", message: "Override card removed" });
+        loadData();
+      } catch (err: any) {
+        setAlert({ type: "error", message: err.message || "Failed to remove override card" });
+      }
+    }
+  };
+
+  return (
+    <div className="space-y-4">
+      {alert && (
+        <Alert type={alert.type} message={alert.message} onClose={() => setAlert(null)} />
+      )}
+      <div className="flex justify-between items-center">
+        <div>
+          <h2 className="text-lg font-semibold">Override / Substitute Cards</h2>
+          <p className="text-sm text-gray-500">
+            Cards that allow teachers to take vacant slots when the scheduled teacher doesn&apos;t show up
+          </p>
+        </div>
+        <Button onClick={() => setShowForm(!showForm)}>
+          {showForm ? "Cancel" : "+ Add Override Card"}
+        </Button>
+      </div>
+      {showForm && (
+        <Card>
+          <CardHeader>
+            <CardTitle>Register Override Card</CardTitle>
+            <p className="text-sm text-gray-500">
+              Assign an RFID card to a teacher. When they use this card, they can take any vacant classroom slot.
+            </p>
+          </CardHeader>
+          <CardContent>
+            <form onSubmit={handleSubmit} className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div>
+                <Label htmlFor="override_teacher">Teacher</Label>
+                <Select
+                  id="override_teacher"
+                  value={formData.teacher}
+                  onChange={(e: React.ChangeEvent<HTMLSelectElement>) =>
+                    setFormData({ ...formData, teacher: e.target.value })
+                  }
+                  required
+                >
+                  <option value="">Select Teacher</option>
+                  {teachers.map((t: User) => (
+                    <option key={t.id} value={t.id}>
+                      {t.first_name} {t.last_name}
+                    </option>
+                  ))}
+                </Select>
+              </div>
+              <div>
+                <Label htmlFor="override_rfid">RFID UID</Label>
+                <div className="flex gap-2">
+                  <Input
+                    id="override_rfid"
+                    value={formData.rfid_uid}
+                    onChange={(e: React.ChangeEvent<HTMLInputElement>) =>
+                      setFormData({ ...formData, rfid_uid: e.target.value.toUpperCase() })
+                    }
+                    placeholder="Scan or type RFID UID"
+                    className="flex-1"
+                  />
+                  <Button
+                    type="button"
+                    variant="outline"
+                    onClick={() => {
+                      if (classrooms.length > 0) startScan(classrooms[0].id);
+                      else setAlert({ type: "error", message: "No active classrooms. Add a classroom first." });
+                    }}
+                    disabled={isScanning || classrooms.length === 0}
+                  >
+                    {isScanning ? "Scanning…" : "Scan"}
+                  </Button>
+                </div>
+                {isScanning && (
+                  <p className="text-xs text-blue-600 mt-1 animate-pulse">Present RFID tag to scanner…</p>
+                )}
+              </div>
+              <div className="md:col-span-2">
+                <Button type="submit">Add Override Card</Button>
+              </div>
+            </form>
+          </CardContent>
+        </Card>
+      )}
+      <Card>
+        <CardContent className="pt-6">
+          {isLoading ? (
+            <div className="py-8 text-center text-gray-500">Loading…</div>
+          ) : overrideCards.length === 0 ? (
+            <div className="py-8 text-center text-gray-500">
+              No override cards. Add one to let teachers use substitute mode for vacant slots.
+            </div>
+          ) : (
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead>RFID UID</TableHead>
+                  <TableHead>Teacher</TableHead>
+                  <TableHead className="text-right">Actions</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {overrideCards.map((card) => (
+                  <TableRow key={card.id}>
+                    <TableCell>
+                      <code className="bg-gray-100 px-2 py-1 rounded text-sm">{card.rfid_uid}</code>
+                    </TableCell>
+                    <TableCell>{card.teacher_name}</TableCell>
+                    <TableCell className="text-right">
+                      <Button variant="destructive" size="sm" onClick={() => handleDelete(card.id)}>
+                        Remove
+                      </Button>
+                    </TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+          )}
+        </CardContent>
+      </Card>
+    </div>
+  );
+}
+
+// ============== MAINTENANCE CARDS TAB ==============
+function MaintenanceCardsTab() {
+  const [cards, setCards] = useState<MaintenanceRFID[]>([]);
+  const [classrooms, setClassrooms] = useState<Classroom[]>([]);
+  const [isLoading, setIsLoading] = useState(true);
+  const [showForm, setShowForm] = useState(false);
+  const [alert, setAlert] = useState<{ type: "success" | "error"; message: string } | null>(null);
+  const [formData, setFormData] = useState({ rfid_uid: "", label: "" });
+  const { isScanning, scannedRFID, scanError, startScan, clearScan } = useRFIDScanner();
+
+  useEffect(() => { loadData(); }, []);
+  useEffect(() => {
+    if (scannedRFID) {
+      setFormData((prev) => ({ ...prev, rfid_uid: scannedRFID }));
+      setAlert({ type: "success", message: `RFID scanned: ${scannedRFID}` });
+      clearScan();
+    }
+  }, [scannedRFID, clearScan]);
+  useEffect(() => { if (scanError) setAlert({ type: "error", message: scanError }); }, [scanError]);
+
+  const loadData = async () => {
+    try {
+      setIsLoading(true);
+      const [cardsData, classroomsData] = await Promise.all([
+        apiService.getMaintenanceRFIDs(),
+        apiService.getClassrooms(),
+      ]);
+      setCards(cardsData);
+      setClassrooms(classroomsData.filter((c) => c.is_active));
+    } catch (err) {
+      setAlert({ type: "error", message: "Failed to load maintenance cards" });
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!formData.rfid_uid.trim()) {
+      setAlert({ type: "error", message: "Scan or enter RFID UID" });
+      return;
+    }
+    try {
+      await apiService.createMaintenanceRFID({
+        rfid_uid: formData.rfid_uid.trim().toUpperCase(),
+        label: formData.label.trim() || undefined,
+      });
+      setFormData({ rfid_uid: "", label: "" });
+      setShowForm(false);
+      setAlert({ type: "success", message: "Maintenance card added" });
+      loadData();
+    } catch (err: unknown) {
+      setAlert({ type: "error", message: err instanceof Error ? err.message : "Failed to add card" });
+    }
+  };
+
+  const handleDelete = async (id: number) => {
+    if (confirm("Remove this maintenance card? Staff will no longer be able to use it to control lights.")) {
+      try {
+        await apiService.deleteMaintenanceRFID(id);
+        setAlert({ type: "success", message: "Maintenance card removed" });
+        loadData();
+      } catch (err: unknown) {
+        setAlert({ type: "error", message: err instanceof Error ? err.message : "Failed to remove card" });
+      }
+    }
+  };
+
+  return (
+    <div className="space-y-4">
+      {alert && <Alert type={alert.type} message={alert.message} onClose={() => setAlert(null)} />}
+      <div className="flex justify-between items-center">
+        <div>
+          <h2 className="text-lg font-semibold">Maintenance Cards</h2>
+          <p className="text-sm text-gray-500">
+            Staff cards to turn lights on/off. No attendance recorded. Blocked when a teacher is in the room.
+          </p>
+        </div>
+        <Button onClick={() => setShowForm(!showForm)}>
+          {showForm ? "Cancel" : "+ Add Maintenance Card"}
+        </Button>
+      </div>
+      {showForm && (
+        <Card>
+          <CardHeader>
+            <CardTitle>Register Maintenance Card</CardTitle>
+            <p className="text-sm text-gray-500">
+              Staff can use this card to toggle classroom lights. Does not create attendance. Blocked if teacher is present.
+            </p>
+          </CardHeader>
+          <CardContent>
+            <form onSubmit={handleSubmit} className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div>
+                <Label htmlFor="maint_rfid">RFID UID</Label>
+                <div className="flex gap-2">
+                  <Input
+                    id="maint_rfid"
+                    value={formData.rfid_uid}
+                    onChange={(e: React.ChangeEvent<HTMLInputElement>) =>
+                      setFormData({ ...formData, rfid_uid: e.target.value.toUpperCase() })
+                    }
+                    placeholder="Scan or type RFID UID"
+                    className="flex-1"
+                  />
+                  <Button
+                    type="button"
+                    variant="outline"
+                    onClick={() => {
+                      if (classrooms.length > 0) startScan(classrooms[0].id);
+                      else setAlert({ type: "error", message: "No active classrooms. Add a classroom first." });
+                    }}
+                    disabled={isScanning || classrooms.length === 0}
+                  >
+                    {isScanning ? "Scanning…" : "Scan"}
+                  </Button>
+                </div>
+                {isScanning && (
+                  <p className="text-xs text-blue-600 mt-1 animate-pulse">Present RFID tag to scanner…</p>
+                )}
+              </div>
+              <div>
+                <Label htmlFor="maint_label">Label (optional)</Label>
+                <Input
+                  id="maint_label"
+                  value={formData.label}
+                  onChange={(e: React.ChangeEvent<HTMLInputElement>) =>
+                    setFormData({ ...formData, label: e.target.value })
+                  }
+                  placeholder="e.g., Janitor, Facilities"
+                />
+              </div>
+              <div className="md:col-span-2">
+                <Button type="submit">Add Maintenance Card</Button>
+              </div>
+            </form>
+          </CardContent>
+        </Card>
+      )}
+      <Card>
+        <CardContent className="pt-6">
+          {isLoading ? (
+            <div className="py-8 text-center text-gray-500">Loading…</div>
+          ) : cards.length === 0 ? (
+            <div className="py-8 text-center text-gray-500">
+              No maintenance cards. Add one for staff to control lights.
+            </div>
+          ) : (
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead>RFID UID</TableHead>
+                  <TableHead>Label</TableHead>
+                  <TableHead className="text-right">Actions</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {cards.map((card) => (
+                  <TableRow key={card.id}>
+                    <TableCell>
+                      <code className="bg-gray-100 px-2 py-1 rounded text-sm">{card.rfid_uid}</code>
+                    </TableCell>
+                    <TableCell>{card.label || "—"}</TableCell>
+                    <TableCell className="text-right">
+                      <Button variant="destructive" size="sm" onClick={() => handleDelete(card.id)}>
+                        Remove
+                      </Button>
+                    </TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+          )}
+        </CardContent>
+      </Card>
+    </div>
+  );
+}
+
 // ============== MAIN ADMIN PAGE ==============
 export function AdminPage() {
   const [activeTab, setActiveTab] = useState("Teachers");
@@ -1396,7 +1754,7 @@ export function AdminPage() {
       </div>
 
       <Tabs
-        tabs={["Teachers", "Classrooms", "Schedules"]}
+        tabs={["Teachers", "Classrooms", "Schedules", "Override Cards", "Maintenance Cards"]}
         activeTab={activeTab}
         onTabChange={setActiveTab}
       />
@@ -1404,6 +1762,8 @@ export function AdminPage() {
       {activeTab === "Teachers" && <TeachersTab />}
       {activeTab === "Classrooms" && <ClassroomsTab />}
       {activeTab === "Schedules" && <SchedulesTab />}
+      {activeTab === "Override Cards" && <OverrideCardsTab />}
+      {activeTab === "Maintenance Cards" && <MaintenanceCardsTab />}
     </div>
   );
 }

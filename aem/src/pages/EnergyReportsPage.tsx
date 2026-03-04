@@ -30,7 +30,7 @@ export function EnergyReportsPage() {
 
   // Filter state
   const [selectedClassroom, setSelectedClassroom] = useState<string>("");
-  const [selectedRange, setSelectedRange] = useState<"hour" | "day" | "month">(
+  const [selectedRange, setSelectedRange] = useState<"hour" | "day" | "week" | "month">(
     "day"
   );
 
@@ -44,7 +44,7 @@ export function EnergyReportsPage() {
   );
 
   // Use the real-time energy hook
-  const { reports, stats, isLoading, error, isConnected, lastUpdate, refresh } =
+  const { reports, stats, isLoading, isRefreshing, error, isConnected, lastUpdate, refresh } =
     useEnergy(filters);
 
   useEffect(() => {
@@ -76,6 +76,12 @@ export function EnergyReportsPage() {
           weekday: "short",
           month: "short",
           day: "numeric",
+        });
+      case "week":
+        return date.toLocaleDateString("en-US", {
+          month: "short",
+          day: "numeric",
+          year: "2-digit",
         });
       case "month":
         return date.toLocaleDateString("en-US", {
@@ -141,17 +147,22 @@ export function EnergyReportsPage() {
                 id="range"
                 value={selectedRange}
                 onChange={(e) =>
-                  setSelectedRange(e.target.value as "hour" | "day" | "month")
+                  setSelectedRange(e.target.value as "hour" | "day" | "week" | "month")
                 }
               >
                 <option value="hour">Hourly (Last 24 Hours)</option>
                 <option value="day">Daily (Last 30 Days)</option>
+                <option value="week">Weekly (Last 12 Weeks)</option>
                 <option value="month">Monthly (Last Year)</option>
               </Select>
             </div>
             <div className="flex items-end">
-              <Button onClick={refresh} className="w-full">
-                Generate Report
+              <Button
+                onClick={refresh}
+                className="w-full"
+                disabled={isRefreshing}
+              >
+                {isRefreshing ? "Generating…" : "Generate Report"}
               </Button>
             </div>
           </div>

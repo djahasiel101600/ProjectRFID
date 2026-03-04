@@ -5,7 +5,7 @@ import wsService from '../services/websocket';
 
 interface EnergyFilters {
   classroom?: number;
-  range?: 'hour' | 'day' | 'month';
+  range?: 'hour' | 'day' | 'week' | 'month';
 }
 
 // Debounce delay for power updates (ms)
@@ -14,6 +14,7 @@ const POWER_UPDATE_DEBOUNCE = 2000;
 export function useEnergy(filters: EnergyFilters = {}) {
   const [reports, setReports] = useState<EnergyReport[]>([]);
   const [isLoading, setIsLoading] = useState(true);
+  const [isRefreshing, setIsRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [isConnected, setIsConnected] = useState(false);
   const [lastUpdate, setLastUpdate] = useState<Date | null>(null);
@@ -27,13 +28,13 @@ export function useEnergy(filters: EnergyFilters = {}) {
   const filtersRef = useRef(filters);
   filtersRef.current = filters;
 
-  const fetchData = useCallback(async (showLoading = true) => {
+  const fetchData = useCallback(async (showLoading = true): Promise<void> => {
     try {
       // Only show loading spinner on initial load, not on refreshes
       if (showLoading && !hasInitialLoadRef.current) {
         setIsLoading(true);
       }
-      const params: { classroom?: number; range?: 'hour' | 'day' | 'month' } = {
+      const params: { classroom?: number; range?: 'hour' | 'day' | 'week' | 'month' } = {
         range: filtersRef.current.range || 'day',
       };
 
@@ -104,9 +105,14 @@ export function useEnergy(filters: EnergyFilters = {}) {
     };
   }, [filters.classroom, debouncedFetchData]);
 
-  const refresh = useCallback(() => {
-    wsService.requestRefresh();
-    fetchData(false);
+  const refresh = useCallback(async () => {
+    setIsRefreshing(true);
+    try {
+      wsService.requestRefresh();
+      await fetchData(false);
+    } finally {
+      setIsRefreshing(false);
+    }
   }, [fetchData]);
 
   // Calculate totals from reports
@@ -133,6 +139,7 @@ export function useEnergy(filters: EnergyFilters = {}) {
     reports, 
     stats,
     isLoading, 
+    isRefreshing,
     error, 
     isConnected, 
     lastUpdate,

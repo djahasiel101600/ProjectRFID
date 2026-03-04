@@ -167,30 +167,27 @@ class IoTConsumer(AsyncWebsocketConsumer):
             # Process RFID if present (server time is used internally)
             if rfid_uid:
                 result = await self.process_rfid(rfid_uid)
-                                # Send response back to ESP32
+                # Send response back to ESP32
                 await self.send(text_data=json.dumps({
                     'event': result['event'],
                     'data': result['data']
                 }))
                 print(f"[IoT] Sent response to ESP32: {result['event']}")
-                                # Broadcast attendance event to dashboard
-                print(f"[IoT] Broadcasting attendance event to dashboard_classroom_{self.classroom_id}")
-                await self.channel_layer.group_send(
-                    f'dashboard_classroom_{self.classroom_id}',
-                    {
-                        'type': 'attendance_event',
-                        'classroom_id': self.classroom_id,
-                        'event': result['event'],
-                        'data': result['data']
-                    }
-                )
+                # Broadcast attendance event to dashboard (skip for maintenance - no attendance impact)
+                if result['event'] not in ('maintenance_toggle', 'maintenance_blocked'):
+                    await self.channel_layer.group_send(
+                        f'dashboard_classroom_{self.classroom_id}',
+                        {
+                            'type': 'attendance_event',
+                            'classroom_id': self.classroom_id,
+                            'event': result['event'],
+                            'data': result['data']
+                        }
+                    )
             
             # Process power reading if present
             if power is not None:
-                energy_log = await self.save_energy_log(power, voltage, current)
-                
-                # Broadcast power update to dashboard (use the auto-generated timestamp)
-                print(f"[IoT] Broadcasting power update to dashboard_classroom_{self.classroom_id}: {power}W ({voltage}V, {current}A)")
+                # 1. Always broadcast to dashboard (real-time)
                 await self.channel_layer.group_send(
                     f'dashboard_classroom_{self.classroom_id}',
                     {
@@ -199,9 +196,16 @@ class IoTConsumer(AsyncWebsocketConsumer):
                         'voltage': voltage,
                         'current': current,
                         'watts': power,
-                        'timestamp': energy_log.timestamp.isoformat() if energy_log else timezone.now().isoformat()
+                        'timestamp': timezone.now().isoformat()
                     }
                 )
+                # 2. Add to buffer; save aggregated row when window completes
+                from core.services.energy_buffer import add_reading, flush_and_aggregate
+                should_flush = add_reading(self.classroom_id, voltage, current, power, timestamp)
+                if should_flush:
+                    agg = flush_and_aggregate(self.classroom_id)
+                    if agg and agg.get('avg_watts') is not None:
+                        await self.save_energy_log_aggregated(agg)
             
             # Send acknowledgment
             await self.send(text_data=json.dumps({
@@ -244,13 +248,57 @@ class IoTConsumer(AsyncWebsocketConsumer):
         """Process RFID scan and create attendance record.
         
         Uses server time for all timestamps - server is the single source of truth.
+        Card types (checked in order):
+        1. Maintenance RFID - control lights only, no attendance. Blocked when teacher IN.
+        2. Normal/Override RFID - teacher attendance.
         """
-        from core.models import User, Classroom, Schedule, AttendanceSession
-        from django.db.models import Q
+        from core.models import User, Classroom, Schedule, AttendanceSession, OverrideRFID, MaintenanceRFID
         
         try:
-            # Find teacher by RFID
-            teacher = User.objects.get(rfid_uid=rfid_uid, role='teacher', is_active=True)
+            # 1. Check maintenance card first (staff - lights only, no attendance)
+            maintenance_card = MaintenanceRFID.objects.filter(
+                rfid_uid=rfid_uid, is_active=True
+            ).first()
+            if maintenance_card:
+                classroom = Classroom.objects.get(id=self.classroom_id)
+                today = datetime.now().date()
+                active_session = AttendanceSession.objects.filter(
+                    classroom=classroom,
+                    date=today,
+                    status='IN'
+                ).exists()
+                if active_session:
+                    return {
+                        'event': 'maintenance_blocked',
+                        'data': {'message': 'Teacher present'}
+                    }
+                return {
+                    'event': 'maintenance_toggle',
+                    'data': {'message': 'Toggle relay'}
+                }
+            
+            # 2. Find teacher: first by normal RFID, then by override RFID card
+            teacher = None
+            is_override_mode = False
+            try:
+                teacher = User.objects.get(rfid_uid=rfid_uid, role='teacher', is_active=True)
+            except User.DoesNotExist:
+                override_card = OverrideRFID.objects.filter(
+                    rfid_uid=rfid_uid, is_active=True
+                ).select_related('teacher').first()
+                if override_card:
+                    teacher = override_card.teacher
+                    is_override_mode = True
+            
+            if not teacher:
+                return {
+                    'event': 'attendance_error',
+                    'data': {
+                        'message': 'Unknown RFID tag',
+                        'rfid_uid': rfid_uid
+                    }
+                }
+            
             classroom = Classroom.objects.get(id=self.classroom_id)
             
             # Use server time - single source of truth
@@ -371,15 +419,43 @@ class IoTConsumer(AsyncWebsocketConsumer):
                     else:
                         print(f"  (No schedules found for today)")
             
+            # Override mode: if no matching schedule, look for vacant slot (another teacher's slot with no one timed in)
+            if not schedule and is_override_mode:
+                print(f"\n[RFID DEBUG] Override mode: checking for vacant slots in classroom {classroom.name}")
+                time_threshold = (datetime.combine(today, current_time) + timedelta(minutes=15)).time()
+                # Vacant = schedule in this classroom today, current time during slot or within 15 min of start,
+                # and no active session for that schedule today
+                candidate_schedules = Schedule.objects.filter(
+                    classroom=classroom,
+                    day_of_week=day_of_week,
+                    start_time__lte=time_threshold,
+                    end_time__gte=current_time
+                ).order_by('start_time')
+                for cand in candidate_schedules:
+                    # Check if slot is vacant: no one has timed in for this schedule today
+                    occupied = AttendanceSession.objects.filter(
+                        schedule=cand,
+                        date=today,
+                        status='IN'
+                    ).exists()
+                    if not occupied:
+                        schedule = cand
+                        print(f"[RFID DEBUG] FOUND vacant slot: {schedule.start_time} - {schedule.end_time} (was: {schedule.teacher.get_full_name()})")
+                        break
+                if not schedule:
+                    print(f"[RFID DEBUG] No vacant slot found")
+            
             # Create attendance session
             if schedule:
                 # Use naive datetime since USE_TZ=False
                 expected_out = datetime.combine(today, schedule.end_time)
                 status = 'IN'
-                print(f"\n[RFID DEBUG] RESULT: VALID - Creating session with status IN")
+                session_is_override = is_override_mode
+                print(f"\n[RFID DEBUG] RESULT: VALID - Creating session with status IN (override={session_is_override})")
             else:
                 expected_out = None
                 status = 'INVALID'
+                session_is_override = False
                 print(f"\n[RFID DEBUG] RESULT: INVALID - No matching schedule found")
             
             print(f"{'='*60}\n")
@@ -389,10 +465,10 @@ class IoTConsumer(AsyncWebsocketConsumer):
                 classroom=classroom,
                 schedule=schedule,
                 date=today,
-                # time_in uses auto_now_add=True - server sets it automatically
                 expected_out=expected_out,
                 status=status,
-                rfid_uid_used=rfid_uid
+                rfid_uid_used=rfid_uid,
+                is_override=session_is_override
             )
             
             # Schedule real-time timeout if valid session with expected_out
@@ -420,14 +496,6 @@ class IoTConsumer(AsyncWebsocketConsumer):
                 }
             }
             
-        except User.DoesNotExist:
-            return {
-                'event': 'attendance_error',
-                'data': {
-                    'message': 'Unknown RFID tag',
-                    'rfid_uid': rfid_uid
-                }
-            }
         except Exception as e:
             return {
                 'event': 'attendance_error',
@@ -437,19 +505,18 @@ class IoTConsumer(AsyncWebsocketConsumer):
             }
     
     @database_sync_to_async
-    def save_energy_log(self, watts, voltage=None, current=None):
-        """Save energy reading to database. Timestamp is auto-set by the model."""
+    def save_energy_log_aggregated(self, agg: dict):
+        """Save aggregated energy reading from buffer flush. Timestamp = window midpoint."""
         from core.models import Classroom, EnergyLog
         
         classroom = Classroom.objects.get(id=self.classroom_id)
-        energy_log = EnergyLog.objects.create(
+        EnergyLog.objects.create(
             classroom=classroom,
-            voltage=voltage,
-            current=current,
-            watts=watts
-            # timestamp is auto_now_add - set automatically
+            voltage=agg.get('avg_voltage'),
+            current=agg.get('avg_current'),
+            watts=agg['avg_watts'],
+            timestamp=agg['timestamp']
         )
-        return energy_log
 
 
 class DashboardConsumer(AsyncWebsocketConsumer):

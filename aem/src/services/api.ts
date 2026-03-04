@@ -3,7 +3,9 @@
 import type { 
   User, Classroom, Schedule, AttendanceSession, 
   EnergyLog, EnergyReport, DashboardData, LoginResponse,
-  TeacherEnergyUsage, TeacherEnergySummary, TeacherEnergyByClassroom, TeacherEnergyByDate
+  TeacherEnergyUsage, TeacherEnergySummary, TeacherEnergyByClassroom, TeacherEnergyByDate,
+  OverrideRFID,
+  MaintenanceRFID
 } from '../types';
 
 const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000/api';
@@ -83,6 +85,35 @@ class ApiService {
   }
 
   // Auth
+  async getSetupStatus(): Promise<{ needs_setup: boolean }> {
+    const response = await fetch(`${API_BASE_URL}/auth/setup-status/`);
+    return response.json();
+  }
+
+  async register(data: {
+    username: string;
+    email: string;
+    password: string;
+    first_name?: string;
+    last_name?: string;
+  }): Promise<LoginResponse> {
+    const result = await fetch(`${API_BASE_URL}/auth/register/`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(data),
+    });
+    const json = await result.json();
+    if (!result.ok) {
+      throw new Error(json.error || 'Registration failed');
+    }
+    this.accessToken = json.access;
+    this.refreshToken = json.refresh;
+    localStorage.setItem('access_token', json.access);
+    localStorage.setItem('refresh_token', json.refresh);
+    localStorage.setItem('user', JSON.stringify(json.user));
+    return json;
+  }
+
   async login(username: string, password: string): Promise<LoginResponse> {
     const data = await this.request<LoginResponse>('/auth/login/', {
       method: 'POST',
@@ -137,6 +168,14 @@ class ApiService {
     });
   }
 
+  /** Create teacher: first_name, last_name, email only (no username/password). */
+  async createTeacher(data: { first_name: string; last_name: string; email: string; rfid_uid?: string }): Promise<User> {
+    return this.request<User>('/users/', {
+      method: 'POST',
+      body: JSON.stringify({ ...data, role: 'teacher' }),
+    });
+  }
+
   async updateUser(id: number, user: Partial<User>): Promise<User> {
     return this.request<User>(`/users/${id}/`, {
       method: 'PATCH',
@@ -153,6 +192,40 @@ class ApiService {
       method: 'POST',
       body: JSON.stringify({ rfid_uid: rfidUid }),
     });
+  }
+
+  // Override RFID (substitute cards)
+  async getOverrideRFIDs(): Promise<OverrideRFID[]> {
+    const response = await this.request<{ results: OverrideRFID[] } | OverrideRFID[]>('/override-rfids/');
+    return Array.isArray(response) ? response : (response.results || []);
+  }
+
+  async createOverrideRFID(data: { rfid_uid: string; teacher: number }): Promise<OverrideRFID> {
+    return this.request<OverrideRFID>('/override-rfids/', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    });
+  }
+
+  async deleteOverrideRFID(id: number): Promise<void> {
+    await this.request(`/override-rfids/${id}/`, { method: 'DELETE' });
+  }
+
+  // Maintenance RFID (staff - lights control only)
+  async getMaintenanceRFIDs(): Promise<MaintenanceRFID[]> {
+    const response = await this.request<{ results: MaintenanceRFID[] } | MaintenanceRFID[]>('/maintenance-rfids/');
+    return Array.isArray(response) ? response : (response.results || []);
+  }
+
+  async createMaintenanceRFID(data: { rfid_uid: string; label?: string }): Promise<MaintenanceRFID> {
+    return this.request<MaintenanceRFID>('/maintenance-rfids/', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    });
+  }
+
+  async deleteMaintenanceRFID(id: number): Promise<void> {
+    await this.request(`/maintenance-rfids/${id}/`, { method: 'DELETE' });
   }
 
   // Classrooms
@@ -268,7 +341,7 @@ class ApiService {
     return this.request('/energy-logs/latest/');
   }
 
-  async getEnergyReport(params?: { classroom?: number; range?: 'hour' | 'day' | 'month'; start?: string; end?: string }): Promise<EnergyReport[]> {
+  async getEnergyReport(params?: { classroom?: number; range?: 'hour' | 'day' | 'week' | 'month'; start?: string; end?: string }): Promise<EnergyReport[]> {
     const searchParams = new URLSearchParams();
     if (params?.classroom) searchParams.append('classroom', params.classroom.toString());
     if (params?.range) searchParams.append('range', params.range);

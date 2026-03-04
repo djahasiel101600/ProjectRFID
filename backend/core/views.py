@@ -6,14 +6,18 @@ from rest_framework_simplejwt.tokens import RefreshToken
 from django.contrib.auth import authenticate, get_user_model
 from django.utils import timezone
 from django.db.models import Sum, Avg, Max, Min, Count
-from django.db.models.functions import TruncDate, TruncHour, TruncDay, TruncMonth
+from django.db.models.functions import TruncDate, TruncHour, TruncDay, TruncWeek, TruncMonth
 from datetime import datetime, timedelta
-from .models import Classroom, Schedule, AttendanceSession, EnergyLog, EnergyAggregation, TeacherEnergyUsage
+from .models import Classroom, Schedule, AttendanceSession, EnergyLog, EnergyAggregation, TeacherEnergyUsage, OverrideRFID, MaintenanceRFID
 from .serializers import (
-    UserSerializer, UserCreateSerializer, ClassroomSerializer, ClassroomCreateSerializer,
+    UserSerializer, UserCreateSerializer, TeacherCreateSerializer,
+    ClassroomSerializer, ClassroomCreateSerializer,
     ScheduleSerializer, AttendanceSessionSerializer, EnergyLogSerializer,
-    EnergyAggregationSerializer, LoginSerializer, AttendanceReportSerializer, EnergyReportSerializer,
-    TeacherEnergyUsageSerializer, TeacherEnergySummarySerializer
+    EnergyAggregationSerializer, LoginSerializer, RegisterSerializer,
+    AttendanceReportSerializer, EnergyReportSerializer,
+    TeacherEnergyUsageSerializer, TeacherEnergySummarySerializer,
+    OverrideRFIDSerializer,
+    MaintenanceRFIDSerializer
 )
 
 User = get_user_model()
@@ -52,6 +56,36 @@ class LoginView(APIView):
         })
 
 
+class SetupStatusView(APIView):
+    """Check if first-time admin setup is needed (no admin exists)."""
+    permission_classes = [permissions.AllowAny]
+
+    def get(self, request):
+        needs_setup = not User.objects.filter(role='admin').exists()
+        return Response({'needs_setup': needs_setup})
+
+
+class RegisterView(APIView):
+    """First-time admin registration. Only available when no admin exists."""
+    permission_classes = [permissions.AllowAny]
+
+    def post(self, request):
+        if User.objects.filter(role='admin').exists():
+            return Response(
+                {'error': 'Admin already exists. Use login instead.'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        serializer = RegisterSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        user = serializer.save()
+        refresh = RefreshToken.for_user(user)
+        return Response({
+            'access': str(refresh.access_token),
+            'refresh': str(refresh),
+            'user': UserSerializer(user).data
+        })
+
+
 class LogoutView(APIView):
     """Handle user logout by blacklisting refresh token."""
     permission_classes = [permissions.IsAuthenticated]
@@ -74,7 +108,8 @@ class UserViewSet(viewsets.ModelViewSet):
     
     def get_serializer_class(self):
         if self.action == 'create':
-            return UserCreateSerializer
+            # Teachers: first_name, last_name, email only (no username/password)
+            return TeacherCreateSerializer
         return UserSerializer
     
     def get_queryset(self):
@@ -83,7 +118,7 @@ class UserViewSet(viewsets.ModelViewSet):
         if role:
             queryset = queryset.filter(role=role)
         return queryset
-    
+
     @action(detail=False, methods=['get'])
     def teachers(self, request):
         """Get all teachers."""
@@ -237,6 +272,28 @@ class AttendanceSessionViewSet(viewsets.ModelViewSet):
         return Response(report_data)
 
 
+class MaintenanceRFIDViewSet(viewsets.ModelViewSet):
+    """ViewSet for managing maintenance/staff RFID cards (lights control only)."""
+    queryset = MaintenanceRFID.objects.filter(is_active=True)
+    serializer_class = MaintenanceRFIDSerializer
+    permission_classes = [permissions.IsAuthenticated, IsAdminUser]
+    
+    def perform_destroy(self, instance):
+        instance.is_active = False
+        instance.save()
+
+
+class OverrideRFIDViewSet(viewsets.ModelViewSet):
+    """ViewSet for managing override/substitute RFID cards."""
+    queryset = OverrideRFID.objects.select_related('teacher').filter(is_active=True)
+    serializer_class = OverrideRFIDSerializer
+    permission_classes = [permissions.IsAuthenticated, IsAdminUser]
+    
+    def perform_destroy(self, instance):
+        instance.is_active = False
+        instance.save()  # Soft delete
+
+
 class EnergyLogViewSet(viewsets.ReadOnlyModelViewSet):
     """ViewSet for viewing energy logs."""
     queryset = EnergyLog.objects.select_related('classroom').all()
@@ -283,7 +340,7 @@ class EnergyReportView(APIView):
     
     def get(self, request):
         classroom_id = request.query_params.get('classroom')
-        range_type = request.query_params.get('range', 'day')  # hour, day, month
+        range_type = request.query_params.get('range', 'day')  # hour, day, week, month
         start_date = request.query_params.get('start')
         end_date = request.query_params.get('end')
         
@@ -298,6 +355,8 @@ class EnergyReportView(APIView):
                 start_date = now - timedelta(hours=24)
             elif range_type == 'day':
                 start_date = now - timedelta(days=30)
+            elif range_type == 'week':
+                start_date = now - timedelta(weeks=12)
             else:
                 start_date = now - timedelta(days=365)
         
@@ -314,6 +373,8 @@ class EnergyReportView(APIView):
         # Aggregate based on range type
         if range_type == 'hour':
             trunc_func = TruncHour
+        elif range_type == 'week':
+            trunc_func = TruncWeek
         elif range_type == 'month':
             trunc_func = TruncMonth
         else:

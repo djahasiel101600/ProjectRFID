@@ -65,6 +65,36 @@ class Schedule(models.Model):
         return f"{self.teacher} - {self.classroom} ({self.get_day_of_week_display()} {self.start_time}-{self.end_time})"
 
 
+class MaintenanceRFID(models.Model):
+    """RFID cards for staff - control lights only, no attendance. Blocked when teacher is IN."""
+    rfid_uid = models.CharField(max_length=50, unique=True)
+    label = models.CharField(max_length=100, blank=True)  # e.g. "Janitor", "Facilities"
+    is_active = models.BooleanField(default=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    
+    class Meta:
+        db_table = 'maintenance_rfids'
+        ordering = ['label', 'rfid_uid']
+    
+    def __str__(self):
+        return f"Maintenance card {self.rfid_uid}" + (f" ({self.label})" if self.label else "")
+
+
+class OverrideRFID(models.Model):
+    """RFID cards that enable substitute/override mode - teacher can take vacant slots."""
+    rfid_uid = models.CharField(max_length=50, unique=True)
+    teacher = models.ForeignKey(User, on_delete=models.CASCADE, related_name='override_rfid_cards')
+    is_active = models.BooleanField(default=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    
+    class Meta:
+        db_table = 'override_rfids'
+        ordering = ['teacher__first_name', 'teacher__last_name']
+    
+    def __str__(self):
+        return f"Override card {self.rfid_uid} → {self.teacher.get_full_name()}"
+
+
 class AttendanceSession(models.Model):
     """Records teacher attendance sessions."""
     STATUS_CHOICES = [
@@ -83,6 +113,7 @@ class AttendanceSession(models.Model):
     expected_out = models.DateTimeField(null=True, blank=True)
     status = models.CharField(max_length=10, choices=STATUS_CHOICES, default='IN')
     rfid_uid_used = models.CharField(max_length=50)
+    is_override = models.BooleanField(default=False)  # True if used override card to take a vacant slot
     created_at = models.DateTimeField(auto_now_add=True)
     
     class Meta:
@@ -99,7 +130,7 @@ class EnergyLog(models.Model):
     voltage = models.DecimalField(max_digits=6, decimal_places=2, null=True, blank=True)  # Volts (e.g., 220.50)
     current = models.DecimalField(max_digits=8, decimal_places=4, null=True, blank=True)  # Amps (e.g., 1.2500)
     watts = models.DecimalField(max_digits=10, decimal_places=2)
-    timestamp = models.DateTimeField(auto_now_add=True)  # Auto-set to server time when created
+    timestamp = models.DateTimeField()  # Set explicitly (midpoint of aggregation window)
     # Remove created_at since timestamp now serves the same purpose
     
     class Meta:
