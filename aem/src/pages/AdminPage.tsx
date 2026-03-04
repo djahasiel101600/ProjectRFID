@@ -149,7 +149,7 @@ function TeachersTab() {
   // Handle scanned RFID
   useEffect(() => {
     if (scannedRFID) {
-      setFormData((prev) => ({ ...prev, rfid_uid: scannedRFID }));
+      setFormData((prev: typeof formData) => ({ ...prev, rfid_uid: scannedRFID }));
       setAlert({ type: "success", message: `RFID scanned: ${scannedRFID}` });
       clearScan();
     }
@@ -372,7 +372,7 @@ function TeachersTab() {
                   id="email"
                   type="email"
                   value={formData.email}
-                  onChange={(e) =>
+                  onChange={(e: React.ChangeEvent<HTMLInputElement>) =>
                     setFormData({ ...formData, email: e.target.value })
                   }
                   required
@@ -383,7 +383,7 @@ function TeachersTab() {
                 <Input
                   id="first_name"
                   value={formData.first_name}
-                  onChange={(e) =>
+                  onChange={(e: React.ChangeEvent<HTMLInputElement>) =>
                     setFormData({ ...formData, first_name: e.target.value })
                   }
                   required
@@ -394,7 +394,7 @@ function TeachersTab() {
                 <Input
                   id="last_name"
                   value={formData.last_name}
-                  onChange={(e) =>
+                  onChange={(e: React.ChangeEvent<HTMLInputElement>) =>
                     setFormData({ ...formData, last_name: e.target.value })
                   }
                   required
@@ -406,7 +406,7 @@ function TeachersTab() {
                   <Input
                     id="rfid_uid"
                     value={formData.rfid_uid}
-                    onChange={(e) =>
+                    onChange={(e: React.ChangeEvent<HTMLInputElement>) =>
                       setFormData({
                         ...formData,
                         rfid_uid: e.target.value.toUpperCase(),
@@ -479,7 +479,7 @@ function TeachersTab() {
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {teachers.map((teacher) => (
+                {teachers.map((teacher: User) => (
                   <TableRow key={teacher.id}>
                     <TableCell className="font-medium">
                       {teacher.first_name} {teacher.last_name}
@@ -499,7 +499,7 @@ function TeachersTab() {
                     </TableCell>
                     <TableCell>
                       <Badge
-                        variant={teacher.is_active ? "success" : "secondary"}
+                        variant={(teacher.is_active ? "success" : "secondary") as "success" | "secondary"}
                         className="cursor-pointer"
                         onClick={() => handleToggleActive(teacher)}
                       >
@@ -775,7 +775,7 @@ function ClassroomsTab() {
                 <Input
                   id="name"
                   value={formData.name}
-                  onChange={(e) =>
+                  onChange={(e: React.ChangeEvent<HTMLInputElement>) =>
                     setFormData({ ...formData, name: e.target.value })
                   }
                   placeholder="e.g., Room 101"
@@ -787,7 +787,7 @@ function ClassroomsTab() {
                 <Input
                   id="device_id"
                   value={formData.device_id}
-                  onChange={(e) =>
+                  onChange={(e: React.ChangeEvent<HTMLInputElement>) =>
                     setFormData({ ...formData, device_id: e.target.value })
                   }
                   placeholder="e.g., ESP32-ROOM-01"
@@ -800,7 +800,7 @@ function ClassroomsTab() {
                   <Input
                     id="device_token"
                     value={formData.device_token}
-                    onChange={(e) =>
+                    onChange={(e: React.ChangeEvent<HTMLInputElement>) =>
                       setFormData({ ...formData, device_token: e.target.value })
                     }
                     placeholder="Click Generate to create a token"
@@ -849,7 +849,7 @@ function ClassroomsTab() {
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {classrooms.map((classroom) => (
+                {classrooms.map((classroom: Classroom) => (
                   <TableRow key={classroom.id}>
                     <TableCell className="font-medium">
                       {classroom.name}
@@ -1087,7 +1087,7 @@ function SchedulesTab() {
                 required
               >
                 <option value="">Select Teacher</option>
-                {teachers.map((t) => (
+                {teachers.map((t: User) => (
                   <option key={t.id} value={t.id}>
                     {t.first_name} {t.last_name}
                   </option>
@@ -1103,7 +1103,7 @@ function SchedulesTab() {
                 required
               >
                 <option value="">Select Classroom</option>
-                {classrooms.map((c) => (
+                {classrooms.map((c: Classroom) => (
                   <option key={c.id} value={c.id}>
                     {c.name}
                   </option>
@@ -1193,13 +1193,13 @@ function SchedulesTab() {
                 <Select
                   id="teacher"
                   value={formData.teacher}
-                  onChange={(e) =>
+                  onChange={(e: React.ChangeEvent<HTMLSelectElement>) =>
                     setFormData({ ...formData, teacher: e.target.value })
                   }
                   required
                 >
                   <option value="">Select Teacher</option>
-                  {teachers.map((t) => (
+                  {teachers.map((t: User) => (
                     <option key={t.id} value={t.id}>
                       {t.first_name} {t.last_name}
                     </option>
@@ -1211,13 +1211,13 @@ function SchedulesTab() {
                 <Select
                   id="classroom"
                   value={formData.classroom}
-                  onChange={(e) =>
+                  onChange={(e: React.ChangeEvent<HTMLSelectElement>) =>
                     setFormData({ ...formData, classroom: e.target.value })
                   }
                   required
                 >
                   <option value="">Select Classroom</option>
-                  {classrooms.map((c) => (
+                  {classrooms.map((c: Classroom) => (
                     <option key={c.id} value={c.id}>
                       {c.name}
                     </option>
@@ -1229,7 +1229,7 @@ function SchedulesTab() {
                 <Select
                   id="day_of_week"
                   value={formData.day_of_week}
-                  onChange={(e) =>
+                  onChange={(e: React.ChangeEvent<HTMLSelectElement>) =>
                     setFormData({ ...formData, day_of_week: e.target.value })
                   }
                   required
@@ -1246,7 +1246,7 @@ function SchedulesTab() {
                 <Input
                   id="subject"
                   value={formData.subject}
-                  onChange={(e) =>
+                  onChange={(e: React.ChangeEvent<HTMLInputElement>) =>
                     setFormData({ ...formData, subject: e.target.value })
                   }
                   placeholder="e.g., Mathematics"
@@ -1258,7 +1258,7 @@ function SchedulesTab() {
                   id="start_time"
                   type="time"
                   value={formData.start_time}
-                  onChange={(e) =>
+                  onChange={(e: React.ChangeEvent<HTMLInputElement>) =>
                     setFormData({ ...formData, start_time: e.target.value })
                   }
                   required
@@ -1270,7 +1270,7 @@ function SchedulesTab() {
                   id="end_time"
                   type="time"
                   value={formData.end_time}
-                  onChange={(e) =>
+                  onChange={(e: React.ChangeEvent<HTMLInputElement>) =>
                     setFormData({ ...formData, end_time: e.target.value })
                   }
                   required
@@ -1307,14 +1307,16 @@ function SchedulesTab() {
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {schedules.map((schedule) => (
+                {schedules.map((schedule: Schedule) => (
                   <TableRow key={schedule.id}>
                     <TableCell className="font-medium">
                       {schedule.teacher_name}
                     </TableCell>
                     <TableCell>{schedule.classroom_name}</TableCell>
                     <TableCell>
-                      <Badge variant="outline">{schedule.day_name}</Badge>
+                      <Badge variant="outline">
+                        {schedule.day_name}
+                      </Badge>
                     </TableCell>
                     <TableCell>
                       {schedule.start_time?.slice(0, 5)} -{" "}
