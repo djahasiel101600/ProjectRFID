@@ -44,7 +44,7 @@ export function EnergyReportsPage() {
   );
 
   // Use the real-time energy hook
-  const { reports, stats, isLoading, error, isConnected, lastUpdate, refresh } =
+  const { reports, stats, isLoading, isRefreshing, error, isConnected, lastUpdate, refresh } =
     useEnergy(filters);
 
   useEffect(() => {
@@ -157,8 +157,12 @@ export function EnergyReportsPage() {
               </Select>
             </div>
             <div className="flex items-end">
-              <Button onClick={refresh} className="w-full">
-                Generate Report
+              <Button
+                onClick={refresh}
+                className="w-full"
+                disabled={isRefreshing}
+              >
+                {isRefreshing ? "Generating…" : "Generate Report"}
               </Button>
             </div>
           </div>
