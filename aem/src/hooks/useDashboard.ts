@@ -113,13 +113,14 @@ export function useDashboard(classroomId?: number) {
             });
           }
           
-          // Update dashboard data
+          // Update dashboard data (use Number() to handle string/number mismatch from JSON)
           setData(prev => {
             if (!prev) return prev;
+            const mid = Number(message.classroom_id);
             return {
               ...prev,
               classrooms: prev.classrooms.map(c => 
-                c.id === message.classroom_id 
+                Number(c.id) === mid 
                   ? { 
                       ...c, 
                       current_voltage: message.voltage ?? null,
