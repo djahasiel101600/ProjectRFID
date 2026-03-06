@@ -77,7 +77,7 @@ const int DAYLIGHT_OFFSET_SEC = 0;
 // Power Monitoring Calibration
 #define AC_FREQUENCY 60              // AC line frequency in Hz (50Hz or 60Hz)
 #define ZMPT101B_SENSITIVITY 483.50f // ZMPT101B sensitivity (calibrate with actual voltage)
-#define CURRENT_SENSITIVITY 0.039f   // ACS724: 40mV per A
+#define CURRENT_SENSITIVITY 0.040f   // ACS724: 40mV per A
 #define SAMPLES_PER_CYCLE 30         // Samples per AC cycle (reduced for faster loop)
 #define MEASUREMENT_CYCLES 5         // Number of cycles (balanced: accuracy vs responsiveness)
 #define NOMINAL_VOLTAGE 230.0        // Expected AC voltage (adjust for your region: 110V/220V/230V)
@@ -101,8 +101,8 @@ const int DAYLIGHT_OFFSET_SEC = 0;
 
 // Energy Conservation - Relay Control
 #define RELAY_PIN 14 // 5V Relay - Controls 230V classroom lights
-#define RFID_REINIT_DELAY_MS 80      // Delay after relay ON (EMI settle)
-#define RFID_REINIT_DELAY_OFF_MS 280 // Longer delay after relay OFF (worse EMI/kickback)
+#define RFID_REINIT_DELAY_MS 1.5      // Delay after relay ON (EMI settle)
+#define RFID_REINIT_DELAY_OFF_MS 2.5 // Longer delay after relay OFF (worse EMI/kickback)
 
 // ============== REAL-TIME OPTIMIZATION ==============
 // Reduced intervals for faster response
@@ -708,13 +708,49 @@ void setupRFID()
 
 // Re-initialize RFID after relay trigger (fallback for RC522 lock/EMI)
 // Must be called from main loop only - never from WebSocket callback
+// Robust: hardware RST pulse, SPI reset, version verification, retries
 void reinitRFID(bool afterRelayOff)
 {
-    unsigned long delayMs = afterRelayOff ? RFID_REINIT_DELAY_OFF_MS : RFID_REINIT_DELAY_MS;
-    delay(delayMs); // Let relay EMI settle (longer for OFF - worse kickback)
-    SPI.begin();
-    rfid.PCD_Init();
-    Serial.println("RFID re-initialized (post-relay)");
+    const unsigned long emiDelay = afterRelayOff ? RFID_REINIT_DELAY_OFF_MS : RFID_REINIT_DELAY_MS;
+    const int maxRetries = 3;
+
+    // 1. Stop any active RC522 operations
+    rfid.PCD_StopCrypto1();
+    rfid.PICC_HaltA();
+
+    // 2. Let EMI settle
+    delay(emiDelay);
+
+    for (int attempt = 0; attempt < maxRetries; attempt++)
+    {
+        // 3. Hardware reset via RST pin (full chip reset)
+        pinMode(RFID_RST_PIN, OUTPUT);
+        digitalWrite(RFID_RST_PIN, LOW);
+        delay(10);
+        digitalWrite(RFID_RST_PIN, HIGH);
+        delay(10);
+
+        // 4. Reset SPI bus
+        SPI.end();
+        delay(5);
+        SPI.begin();
+
+        // 5. Software init
+        rfid.PCD_Init();
+
+        // 6. Verify chip responded (0x91, 0x92 = MFRC522; 0x88 = FM17522 clone; 0x90 = older)
+        byte version = rfid.PCD_ReadRegister(MFRC522::VersionReg);
+        if (version == 0x91 || version == 0x92 || version == 0x88 || version == 0x90)
+        {
+            Serial.println("RFID re-initialized (post-relay)");
+            return;
+        }
+
+        Serial.printf("[RFID] Reinit attempt %d failed (version=0x%02X)\n", attempt + 1, version);
+        delay(50);
+    }
+
+    Serial.println("[RFID] Reinit failed after retries");
 }
 
 // ============== RFID READ (OPTIMIZED) ==============
