@@ -14,7 +14,26 @@ import type { DashboardClassroom } from "../types";
 // Threshold for considering ESP32 device offline (no power data)
 const OFFLINE_THRESHOLD_MS = 2 * 60 * 1000;
 
-function isDeviceOffline(lastPowerUpdate: string | null): boolean {
+type PowerReading = { timestamp: string; classroomId: number };
+function hasRecentPowerReading(
+  classroomId: number,
+  powerHistory: PowerReading[]
+): boolean {
+  const cutoff = Date.now() - OFFLINE_THRESHOLD_MS;
+  return powerHistory.some(
+    (r) =>
+      Number(r.classroomId) === Number(classroomId) &&
+      new Date(r.timestamp).getTime() > cutoff
+  );
+}
+
+function isDeviceOffline(
+  lastPowerUpdate: string | null,
+  classroomId: number,
+  powerHistory: PowerReading[]
+): boolean {
+  // Use powerHistory as source of truth when available (real-time WebSocket data)
+  if (hasRecentPowerReading(classroomId, powerHistory)) return false;
   if (!lastPowerUpdate) return true;
   try {
     const last = new Date(lastPowerUpdate).getTime();
@@ -27,11 +46,17 @@ function isDeviceOffline(lastPowerUpdate: string | null): boolean {
 // Memoized ClassroomCard - only re-renders when its props change
 const ClassroomCard = memo(function ClassroomCard({
   classroom,
+  powerHistory,
 }: {
   classroom: DashboardClassroom;
+  powerHistory: PowerReading[];
 }) {
   const { remaining, formatted } = useCountdown(classroom.countdown_seconds);
-  const deviceOffline = isDeviceOffline(classroom.last_power_update);
+  const deviceOffline = isDeviceOffline(
+    classroom.last_power_update,
+    classroom.id,
+    powerHistory
+  );
 
   return (
     <Card className="hover:shadow-lg transition-shadow">
@@ -205,7 +230,7 @@ export function DashboardPage() {
   }
 
   const offlineClassrooms = (data.classrooms ?? []).filter((c) =>
-    isDeviceOffline(c.last_power_update)
+    isDeviceOffline(c.last_power_update, c.id, powerHistory)
   );
   const hasOfflineDevices = offlineClassrooms.length > 0 && isConnected;
 
@@ -309,7 +334,11 @@ export function DashboardPage() {
         <h2 className="text-xl font-semibold mb-4">Classrooms</h2>
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
           {(data.classrooms ?? []).map((classroom) => (
-            <ClassroomCard key={classroom.id} classroom={classroom} />
+            <ClassroomCard
+              key={classroom.id}
+              classroom={classroom}
+              powerHistory={powerHistory}
+            />
           ))}
         </div>
         {(data.classrooms ?? []).length === 0 && (
