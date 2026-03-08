@@ -293,7 +293,7 @@ Override RFID cards allow teachers to take **vacant slots** when the scheduled t
 ## 13. Directory Structure
 
 ```
-ProjectRFID/
+project/
 ├── backend/           # Django API + WebSocket server
 │   ├── backend/       # Settings, ASGI, Celery
 │   ├── core/          # Models, views, consumers, tasks
@@ -308,7 +308,13 @@ ProjectRFID/
 │       └── types/
 ├── esp32/             # PlatformIO firmware
 │   └── src/main.cpp
+├── docs/              # Project documentation
+│   ├── README.md
+│   ├── SYSTEM_ARCHITECTURE.md
+│   ├── DOCKER.md
+│   ├── PRD.md
+│   └── RFID_SCAN_TROUBLESHOOTING.md
 ├── docker-compose.yml
 ├── README.md
-└── SYSTEM_ARCHITECTURE.md (this file)
+└── toDO.md
 ```

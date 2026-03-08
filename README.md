@@ -18,8 +18,24 @@ project/
 │       ├── pages/       # Page components
 │       ├── services/    # API and WebSocket services
 │       └── types/       # TypeScript types
-└── prd_io_t_based_attendance_energy_consumption_tracking_system.md
+├── esp32/             # ESP32 firmware (PlatformIO)
+├── docs/              # Project documentation
+│   ├── README.md      # Documentation index
+│   ├── SYSTEM_ARCHITECTURE.md
+│   ├── DOCKER.md
+│   ├── PRD.md
+│   └── RFID_SCAN_TROUBLESHOOTING.md
+└── toDO.md
 ```
+
+## Documentation
+
+See [docs/](docs/README.md) for detailed documentation:
+
+- **[System Architecture](docs/SYSTEM_ARCHITECTURE.md)** – Design, data flow, and components
+- **[Docker Deployment](docs/DOCKER.md)** – Run with Docker Compose
+- **[PRD](docs/PRD.md)** – Product requirements
+- **[RFID Scan Troubleshooting](docs/RFID_SCAN_TROUBLESHOOTING.md)** – RFID scan troubleshooting
 
 ## Technology Stack
 
