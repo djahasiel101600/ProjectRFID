@@ -95,16 +95,23 @@ export function AttendanceReportsPage() {
   const getExcessMinutes = (session: {
     status: string;
     expected_out: string | null;
+    time_out: string | null;
     date: string;
   }) => {
-    if (session.status !== "IN" || !session.expected_out) return null;
+    if (!session.expected_out) return null;
     const expected =
       parseLocalDateTime(session.expected_out) ??
       new Date(session.expected_out.includes("T") ? session.expected_out : `${session.date}T${session.expected_out}`);
     if (isNaN(expected.getTime())) return null;
-    const now = new Date();
-    if (now <= expected) return null;
-    return Math.floor((now.getTime() - expected.getTime()) / 60000);
+    // For IN sessions: use current time. For completed (MANUAL_OUT, CASCADE_OUT, AUTO_OUT): use time_out
+    const endTime =
+      session.status === "IN"
+        ? new Date()
+        : session.time_out
+          ? (parseLocalDateTime(session.time_out) ?? new Date(session.time_out))
+          : null;
+    if (!endTime || isNaN(endTime.getTime()) || endTime <= expected) return null;
+    return Math.floor((endTime.getTime() - expected.getTime()) / 60000);
   };
 
   return (
