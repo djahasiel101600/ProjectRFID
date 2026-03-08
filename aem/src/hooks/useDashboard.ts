@@ -216,3 +216,51 @@ export function useCountdown(targetSeconds: number | null) {
 
   return { remaining, formatted: formatTime(remaining) };
 }
+
+/** Format seconds as H:MM:SS or M:SS. Exported for reuse. */
+export function formatSeconds(seconds: number): string {
+  const h = Math.floor(seconds / 3600);
+  const m = Math.floor((seconds % 3600) / 60);
+  const s = Math.floor(seconds % 60);
+  if (h > 0) {
+    return `${h}:${m.toString().padStart(2, '0')}:${s.toString().padStart(2, '0')}`;
+  }
+  return `${m}:${s.toString().padStart(2, '0')}`;
+}
+
+/**
+ * Running session timer: elapsed time updates every second.
+ * When past expected_out, returns excess seconds for highlighting.
+ */
+export function useRunningSession(
+  timeIn: string | null | undefined,
+  expectedOut: string | null | undefined
+) {
+  const [now, setNow] = useState(() => Date.now());
+
+  useEffect(() => {
+    if (!timeIn) return;
+    const interval = setInterval(() => setNow(Date.now()), 1000);
+    return () => clearInterval(interval);
+  }, [timeIn]);
+
+  if (!timeIn) {
+    return { elapsedSeconds: 0, excessSeconds: 0, formattedElapsed: '-', formattedExcess: null, isExcess: false };
+  }
+
+  const timeInMs = new Date(timeIn).getTime();
+  const elapsedSeconds = Math.max(0, (now - timeInMs) / 1000);
+  const expectedOutMs = expectedOut ? new Date(expectedOut).getTime() : null;
+  const expectedDurationSeconds = expectedOutMs ? (expectedOutMs - timeInMs) / 1000 : null;
+  const isExcess = expectedDurationSeconds != null && elapsedSeconds > expectedDurationSeconds;
+  const excessSeconds = isExcess ? elapsedSeconds - expectedDurationSeconds : 0;
+
+  return {
+    elapsedSeconds,
+    excessSeconds,
+    formattedElapsed: formatSeconds(elapsedSeconds),
+    formattedExcess: isExcess ? formatSeconds(excessSeconds) : null,
+    isExcess,
+    expectedDurationSeconds,
+  };
+}

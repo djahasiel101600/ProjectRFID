@@ -264,9 +264,9 @@ class AttendanceSessionViewSet(viewsets.ModelViewSet):
         # Group by date
         report_data = queryset.values('date').annotate(
             total_sessions=Count('id'),
-            valid_sessions=Count('id', filter=models.Q(status='IN') | models.Q(status='AUTO_OUT')),
+            valid_sessions=Count('id', filter=models.Q(status='IN') | models.Q(status='AUTO_OUT') | models.Q(status='MANUAL_OUT') | models.Q(status='CASCADE_OUT')),
             invalid_sessions=Count('id', filter=models.Q(status='INVALID')),
-            auto_timeout_sessions=Count('id', filter=models.Q(status='AUTO_OUT'))
+            auto_timeout_sessions=Count('id', filter=models.Q(status='AUTO_OUT') | models.Q(status='MANUAL_OUT') | models.Q(status='CASCADE_OUT'))
         ).order_by('-date')
         
         return Response(report_data)
@@ -434,15 +434,20 @@ class DashboardView(APIView):
             # Get current power
             latest_energy = classroom.energy_logs.order_by('-timestamp').first()
             
-            # Get expected timeout
+            # Get expected timeout and excess time
             countdown = None
+            excess_minutes = None
             if current_session and current_session.expected_out:
                 remaining = (current_session.expected_out - now).total_seconds()
                 countdown = max(0, int(remaining))
+                if remaining < 0:
+                    excess_minutes = int(-remaining / 60)
             
             classroom_data.append({
                 'id': classroom.id,
                 'name': classroom.name,
+                'excess_minutes': excess_minutes,
+                'expected_out': current_session.expected_out.isoformat() if current_session and current_session.expected_out else None,
                 'current_teacher': UserSerializer(current_session.teacher).data if current_session else None,
                 'time_in': current_session.time_in.isoformat() if current_session else None,
                 'countdown_seconds': countdown,
@@ -457,7 +462,7 @@ class DashboardView(APIView):
             'stats': {
                 'total_today': today_sessions.count(),
                 'active': active_sessions.count(),
-                'completed': today_sessions.filter(status='AUTO_OUT').count(),
+                'completed': today_sessions.filter(status__in=['AUTO_OUT', 'MANUAL_OUT', 'CASCADE_OUT']).count(),
                 'invalid': today_sessions.filter(status='INVALID').count()
             }
         })

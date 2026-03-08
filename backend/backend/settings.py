@@ -228,11 +228,8 @@ CELERY_TIMEZONE = TIME_ZONE  # Use the same timezone as Django
 CELERY_ENABLE_UTC = False
 
 # Celery Beat Schedule - Periodic Tasks
+# Auto-timeout disabled: teachers must manually tap out for accountability
 CELERY_BEAT_SCHEDULE = {
-    'auto-timeout-attendance-sessions': {
-        'task': 'core.tasks.auto_timeout_sessions',
-        'schedule': 30.0,  # Run every 30 seconds
-    },
     # Optional: Daily cleanup task (runs at midnight)
     # 'cleanup-old-sessions': {
     #     'task': 'core.tasks.cleanup_old_sessions',

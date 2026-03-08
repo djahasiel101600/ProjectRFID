@@ -55,7 +55,7 @@ def with_database_retry(max_retries=MAX_RETRIES, delay_base=RETRY_DELAY_BASE):
 def calculate_teacher_energy_for_session(session: AttendanceSession) -> TeacherEnergyUsage | None:
     """
     Calculate energy consumption for a completed attendance session.
-    Only works for sessions with time_out (AUTO_OUT status).
+    Only works for sessions with time_out (MANUAL_OUT, CASCADE_OUT, or AUTO_OUT status).
     
     Args:
         session: The completed AttendanceSession instance
@@ -63,7 +63,7 @@ def calculate_teacher_energy_for_session(session: AttendanceSession) -> TeacherE
     Returns:
         TeacherEnergyUsage instance or None if calculation not possible
     """
-    if not session.time_out or session.status not in ['AUTO_OUT']:
+    if not session.time_out or session.status not in ['AUTO_OUT', 'MANUAL_OUT', 'CASCADE_OUT']:
         return None
     
     # Get energy logs during the session period (read-only, no lock needed)
@@ -156,7 +156,7 @@ def recalculate_all_teacher_energy(batch_size=10, delay_between_batches=0.5):
     # Get all session IDs that need processing (read-only)
     session_ids = list(
         AttendanceSession.objects.filter(
-            status='AUTO_OUT',
+            status__in=['AUTO_OUT', 'MANUAL_OUT', 'CASCADE_OUT'],
             time_out__isnull=False
         ).values_list('id', flat=True)
     )
@@ -264,7 +264,7 @@ def calculate_single_session_safe(session_id: int) -> dict:
     Useful for backfilling data or after schema changes.
     """
     sessions = AttendanceSession.objects.filter(
-        status='AUTO_OUT',
+        status__in=['AUTO_OUT', 'MANUAL_OUT', 'CASCADE_OUT'],
         time_out__isnull=False
     ).select_related('teacher', 'classroom')
     

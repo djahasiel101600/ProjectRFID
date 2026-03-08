@@ -32,8 +32,8 @@ The system automatically tracks **teacher attendance** via RFID and **classroom 
 2. Opens WebSocket to `/ws/iot/classroom/{id}/?token={device_token}`.
 3. Reads RFID every 50 ms and power (V, I, P) every 5 seconds.
 4. Sends RFID scans and power readings as JSON over WebSocket.
-5. Receives attendance responses, timeout warnings, and scan-mode commands.
-6. Turns lights ON when a teacher times in, OFF on checkout or auto-timeout.
+5. Receives attendance responses and scan-mode commands.
+6. Turns lights ON when a teacher times in, OFF on manual checkout only (no auto-timeout).
 
 **Payload formats sent to backend:**
 - RFID: `{ device_id, rfid_uid, voltage, current, power }`
@@ -50,7 +50,7 @@ The system automatically tracks **teacher attendance** via RFID and **classroom 
 | **Django REST Framework** | REST API for CRUD, auth, reports |
 | **Django Channels** | WebSocket consumers (IoT, Dashboard, Admin) |
 | **Redis** | Channel layer and Celery broker |
-| **Celery + Celery Beat** | Scheduled auto-timeout and periodic tasks |
+| **Celery + Celery Beat** | Optional periodic tasks (auto-timeout disabled; teachers must manually tap out) |
 | **SQLite / PostgreSQL** | Persistent data |
 
 **Main modules:**
@@ -102,8 +102,11 @@ If already IN → manual checkout (MANUAL_OUT)
     ↓
 Check Schedule: teacher's own schedule (day, time, 15-min window)
 If no match AND override mode → look for VACANT slot (another teacher's slot with no one timed in)
+If no vacant slot AND another teacher IN → EARLY TAKEOVER: use teacher's next schedule in this room
     ↓
-If valid schedule or vacant slot → create AttendanceSession (status=IN, is_override if from override card), schedule Celery timeout
+Before creating session: CASCADE any other teacher IN in this classroom → CASCADE_OUT (broadcast to dashboard only, not ESP32)
+    ↓
+If valid schedule or vacant slot or early takeover → create AttendanceSession (status=IN, is_override if override)
 If no schedule → create AttendanceSession (status=INVALID)
     ↓
 Broadcast to DashboardConsumer (attendance_event)
@@ -125,20 +128,17 @@ Broadcast to DashboardConsumer (power_update)
 Frontend updates power display in real time
 ```
 
-### 3.3 Auto-Timeout Flow
+### 3.3 Manual Checkout & Cascade (No Auto-Timeout)
 
-**Real-time (Celery):**
-- When a valid session is created, `schedule_session_timeout()` schedules:
-  - `warning_timeout_session` at `expected_out - 5 minutes`
-  - `timeout_session` at `expected_out`
-- Warning and final timeout are sent to ESP32 and dashboard via channel layer.
+**Design:** Teachers must manually tap out to turn off lights and end attendance. This ensures accountability and avoids leaving students in the dark when the schedule ends.
 
-**Periodic (Celery Beat / management command):**
-- `auto_timeout_sessions` runs periodically (e.g. every 30–60 s).
-- Finds sessions with `status=IN` and `expected_out <= now`.
-- Marks them `AUTO_OUT`, sets `time_out`.
-- Calculates `TeacherEnergyUsage` for completed sessions.
-- Broadcasts `auto_timeout_event` to dashboard.
+**Checkout types:**
+- **MANUAL_OUT** – Teacher taps their card again during an active session.
+- **CASCADE_OUT** – Next teacher taps in; previous teacher (who forgot to tap out) is automatically checked out. Energy and time_out are set at cascade moment. Dashboard is notified; ESP32 is not (lights stay on; next teacher gets attendance_in).
+
+**Energy calculation:** Triggered on MANUAL_OUT and CASCADE_OUT. `TeacherEnergyUsage` is computed when a session has `time_out` and status in (AUTO_OUT, MANUAL_OUT, CASCADE_OUT).
+
+**Excess time:** When a session is IN and `now > expected_out`, the system computes and displays `excess_minutes` (classroom card and session table) for accountability.
 
 ---
 
@@ -167,7 +167,7 @@ Frontend updates power display in real time
 - **initial_data** – Full dashboard state on connect
 - **attendance** – Time-in, time-out, invalid, error
 - **power** – voltage, current, watts, timestamp
-- **auto_timeout** – Session ended by auto-timeout
+- **auto_timeout** – (Legacy) Session ended by auto-timeout; no longer used
 
 ---
 
@@ -180,20 +180,20 @@ Frontend updates power display in real time
 - **Schedule** – `teacher`, `classroom`, `day_of_week`, `start_time`, `end_time`, `subject`
 - **MaintenanceRFID** – `rfid_uid`, `label`; staff cards for lights control only, no attendance. Blocked when teacher IN.
 - **OverrideRFID** – `rfid_uid`, `teacher`; cards that enable substitute/override mode (teacher can take vacant slots)
-- **AttendanceSession** – `teacher`, `classroom`, `schedule`, `date`, `time_in`, `time_out`, `expected_out`, `status` (IN, MANUAL_OUT, AUTO_OUT, INVALID), `is_override` (true if session started via override card)
+- **AttendanceSession** – `teacher`, `classroom`, `schedule`, `date`, `time_in`, `time_out`, `expected_out`, `status` (IN, MANUAL_OUT, AUTO_OUT, CASCADE_OUT, INVALID), `is_override`
 - **EnergyLog** – `classroom`, `voltage`, `current`, `watts`, `timestamp`
 - **EnergyAggregation** – Pre-aggregated kWh by hour/day/month
-- **TeacherEnergyUsage** – Energy attributed to each attendance session (computed after AUTO_OUT)
+- **TeacherEnergyUsage** – Energy attributed to each attendance session (computed after MANUAL_OUT, CASCADE_OUT, or AUTO_OUT)
 
 ### 5.2 Attendance Rules
 
 - **Maintenance RFID**: Staff card. Control lights only (toggle relay). No attendance created. **Blocked** when a teacher has an active session (status=IN) in that classroom. ESP32 receives `maintenance_toggle` or `maintenance_blocked`.
 - Attendance is **time-in only**; no explicit RFID time-out.
 - **Valid** if RFID scanned during schedule or within 15 minutes of `start_time`.
-- **Override/Substitute mode**: When an **Override RFID** card is used, if the teacher has no matching schedule, the system checks for **vacant slots** (another teacher's scheduled slot in that classroom where no one has timed in). If found, the teacher can take that slot; session is created with `is_override=True`.
-- **Invalid** if scanned outside schedule and (no override card or no vacant slot); still logged.
-- **Manual checkout**: second RFID tap during active session → MANUAL_OUT.
-- **Auto-timeout**: session ends at `expected_out` via Celery or periodic task.
+- **Override/Substitute mode**: When an **Override RFID** card is used, if the teacher has no matching schedule, the system checks for **vacant slots** (another teacher's scheduled slot in that classroom where no one has timed in). If found, the teacher can take that slot; session is created with `is_override=True`. If no vacant slot but another teacher is IN, **early takeover** allows the tapping teacher to use their next schedule in that room (e.g. B taps at 8:30 for 9:00–10:00; A is cascaded; B gets in).
+- **Invalid** if scanned outside schedule and (no override card or no vacant slot or no early takeover); still logged.
+- **Manual checkout**: second RFID tap during active session → MANUAL_OUT. Lights turn off.
+- **Cascade checkout**: when a new teacher taps in and another teacher is IN, the previous teacher is set to CASCADE_OUT (time_out=now). Dashboard notified; ESP32 not (lights stay on; next teacher gets attendance_in).
 - One active session per teacher per classroom per day.
 
 ---
@@ -232,7 +232,7 @@ Shared volumes: `backend_data` for SQLite, `backend_static` for static files.
 ## 8. Energy Calculation
 
 - **EnergyLog**: raw readings (V, I, P) stored per classroom.
-- **TeacherEnergyUsage** (after AUTO_OUT):  
+- **TeacherEnergyUsage** (after MANUAL_OUT, CASCADE_OUT, or AUTO_OUT):  
   - Filter `EnergyLog` by `time_in`–`time_out`  
   - Aggregate avg/max/min watts, count readings  
   - Compute `total_kwh = avg_watts * hours / 1000`  
@@ -276,7 +276,9 @@ Override RFID cards allow teachers to take **vacant slots** when the scheduled t
 4. When the teacher uses this card (instead of their normal RFID) and they have no matching schedule, the system looks for vacant slots in the classroom. A vacant slot = a schedule where no one has timed in today.
 5. If found, the teacher can take the slot; session is created with `is_override=True` for reporting.
 
-**Example:** Teacher A (8:00–9:00) doesn't show. Teacher B (9:00–10:30) has an override card. Teacher B scans the override card at 8:15 in the classroom → system finds vacant 8:00–9:00 slot → Teacher B gets in, session uses 9:00 as `expected_out` for auto-timeout.
+**Example (vacant slot):** Teacher A (8:00–9:00) doesn't show. Teacher B (9:00–10:30) has an override card. Teacher B scans at 8:15 → system finds vacant 8:00–9:00 slot → Teacher B gets in, `expected_out` = 9:00.
+
+**Example (early takeover):** Teacher A (8:00–9:00) taps in, leaves at 8:30, forgets to tap out. Teacher B (9:00–10:00) uses override at 8:30 → A is CASCADE_OUT; B gets in early with `expected_out` = 10:00.
 
 ---
 

@@ -104,7 +104,7 @@ export function useAttendance(filters: AttendanceFilters = {}) {
   const stats = {
     total: sessions.length,
     active: sessions.filter(s => s.status === 'IN').length,
-    completed: sessions.filter(s => s.status === 'AUTO_OUT').length,
+    completed: sessions.filter(s => ['AUTO_OUT', 'MANUAL_OUT', 'CASCADE_OUT'].includes(s.status)).length,
     invalid: sessions.filter(s => s.status === 'INVALID').length,
   };
 

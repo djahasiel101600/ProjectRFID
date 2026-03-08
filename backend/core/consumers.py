@@ -1,4 +1,5 @@
 import json
+from asgiref.sync import async_to_sync
 from channels.generic.websocket import AsyncWebsocketConsumer
 from channels.db import database_sync_to_async
 from django.utils import timezone
@@ -338,12 +339,12 @@ class IoTConsumer(AsyncWebsocketConsumer):
                 existing_session.status = 'MANUAL_OUT'
                 existing_session.save()
                 
-                # Cancel scheduled auto-timeout if any
+                # Calculate energy for completed session
                 try:
-                    from core.tasks import cancel_session_timeout
-                    cancel_session_timeout(existing_session)
+                    from core.services.energy_calculation import calculate_teacher_energy_for_session
+                    calculate_teacher_energy_for_session(existing_session)
                 except Exception as e:
-                    print(f"[RFID] Warning: Could not cancel timeout task: {e}")
+                    print(f"[RFID] Warning: Could not calculate energy for session: {e}")
                 
                 print(f"[RFID DEBUG] Session updated - time_out: {existing_session.time_out}, status: MANUAL_OUT")
                 print(f"{'='*60}\n")
@@ -444,6 +445,67 @@ class IoTConsumer(AsyncWebsocketConsumer):
                         break
                 if not schedule:
                     print(f"[RFID DEBUG] No vacant slot found")
+                
+                # Override early takeover: another teacher is IN, tap in early for own next schedule
+                if not schedule and is_override_mode:
+                    other_in = AttendanceSession.objects.filter(
+                        classroom=classroom,
+                        date=today,
+                        status='IN'
+                    ).exclude(teacher=teacher).exists()
+                    if other_in:
+                        next_schedule = Schedule.objects.filter(
+                            teacher=teacher,
+                            classroom=classroom,
+                            day_of_week=day_of_week,
+                            start_time__gt=current_time
+                        ).order_by('start_time').first()
+                        if next_schedule:
+                            schedule = next_schedule
+                            print(f"[RFID DEBUG] Early takeover: using next schedule {schedule.start_time} - {schedule.end_time}")
+            
+            # Cascade: before creating session, check out any other teacher IN in this classroom
+            if schedule:
+                other_sessions = list(AttendanceSession.objects.filter(
+                    classroom=classroom,
+                    date=today,
+                    status='IN'
+                ).exclude(teacher=teacher).select_related('teacher'))
+                for sess in other_sessions:
+                    sess.time_out = now
+                    sess.status = 'CASCADE_OUT'
+                    sess.save()
+                    print(f"[RFID DEBUG] CASCADE_OUT: {sess.teacher.get_full_name()} (session {sess.id})")
+                    try:
+                        from core.services.energy_calculation import calculate_teacher_energy_for_session
+                        calculate_teacher_energy_for_session(sess)
+                    except Exception as e:
+                        print(f"[RFID] Warning: Could not calculate energy for cascaded session: {e}")
+                    # Broadcast cascade to dashboard (not to ESP32 - lights stay on, next teacher gets attendance_in)
+                    channel_layer = getattr(self, 'channel_layer', None)
+                    if channel_layer:
+                        try:
+                            async_to_sync(channel_layer.group_send)(
+                                f'dashboard_classroom_{self.classroom_id}',
+                                {
+                                    'type': 'attendance_event',
+                                    'classroom_id': self.classroom_id,
+                                    'event': 'attendance_out',
+                                    'data': {
+                                        'session_id': sess.id,
+                                        'teacher': sess.teacher.get_full_name(),
+                                        'teacher_id': sess.teacher_id,
+                                        'classroom': classroom.name,
+                                        'classroom_id': classroom.id,
+                                        'time_in': sess.time_in.strftime('%H:%M'),
+                                        'time_out': sess.time_out.strftime('%H:%M'),
+                                        'status': 'CASCADE_OUT',
+                                        'message': 'Checked out (next teacher arrived)'
+                                    }
+                                }
+                            )
+                        except Exception as e:
+                            print(f"[RFID] Warning: Could not broadcast cascade: {e}")
             
             # Create attendance session
             if schedule:
@@ -470,14 +532,6 @@ class IoTConsumer(AsyncWebsocketConsumer):
                 rfid_uid_used=rfid_uid,
                 is_override=session_is_override
             )
-            
-            # Schedule real-time timeout if valid session with expected_out
-            if status == 'IN' and expected_out:
-                try:
-                    from core.tasks import schedule_session_timeout
-                    schedule_session_timeout(session)
-                except Exception as e:
-                    print(f"[RFID] Warning: Could not schedule timeout task: {e}")
             
             event_type = 'attendance_in' if status == 'IN' else 'attendance_invalid'
             
@@ -651,15 +705,20 @@ class DashboardConsumer(AsyncWebsocketConsumer):
                 classroom=classroom
             ).order_by('-timestamp').first()
             
-            # Calculate countdown
+            # Calculate countdown and excess time
             countdown = None
+            excess_minutes = None
             if current_session and current_session.expected_out:
                 remaining = (current_session.expected_out - now).total_seconds()
                 countdown = max(0, int(remaining))
+                if remaining < 0:
+                    excess_minutes = int(-remaining / 60)
             
             classroom_data.append({
                 'id': classroom.id,
                 'name': classroom.name,
+                'excess_minutes': excess_minutes,
+                'expected_out': current_session.expected_out.isoformat() if current_session and current_session.expected_out else None,
                 'current_teacher': {
                     'id': current_session.teacher.id,
                     'username': current_session.teacher.username,
@@ -688,7 +747,7 @@ class DashboardConsumer(AsyncWebsocketConsumer):
             'stats': {
                 'total_today': today_sessions.count(),
                 'active': active_count,
-                'completed': today_sessions.filter(status='AUTO_OUT').count(),
+                'completed': today_sessions.filter(status__in=['AUTO_OUT', 'MANUAL_OUT', 'CASCADE_OUT']).count(),
                 'invalid': today_sessions.filter(status='INVALID').count()
             }
         }

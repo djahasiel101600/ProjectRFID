@@ -48,7 +48,7 @@ export interface AttendanceSession {
   time_in: string;
   time_out: string | null;
   expected_out: string | null;
-  status: 'IN' | 'MANUAL_OUT' | 'AUTO_OUT' | 'INVALID';
+  status: 'IN' | 'MANUAL_OUT' | 'AUTO_OUT' | 'CASCADE_OUT' | 'INVALID';
   status_display: string;
   rfid_uid_used: string;
   created_at: string;
@@ -106,6 +106,8 @@ export interface Teacher {
 export interface DashboardClassroom {
   id: number;
   name: string;
+  excess_minutes?: number | null;
+  expected_out?: string | null;
   current_teacher: Teacher | null;
   time_in: string | null;
   countdown_seconds: number | null;

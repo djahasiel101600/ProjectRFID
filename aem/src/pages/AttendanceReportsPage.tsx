@@ -73,6 +73,8 @@ export function AttendanceReportsPage() {
         return <Badge variant="outline">Manual Out</Badge>;
       case "AUTO_OUT":
         return <Badge variant="default">Auto Out</Badge>;
+      case "CASCADE_OUT":
+        return <Badge variant="secondary">Cascade Out</Badge>;
       case "INVALID":
         return <Badge variant="destructive">Invalid</Badge>;
       default:
@@ -88,6 +90,21 @@ export function AttendanceReportsPage() {
       hour: "2-digit",
       minute: "2-digit",
     });
+  };
+
+  const getExcessMinutes = (session: {
+    status: string;
+    expected_out: string | null;
+    date: string;
+  }) => {
+    if (session.status !== "IN" || !session.expected_out) return null;
+    const expected =
+      parseLocalDateTime(session.expected_out) ??
+      new Date(session.expected_out.includes("T") ? session.expected_out : `${session.date}T${session.expected_out}`);
+    if (isNaN(expected.getTime())) return null;
+    const now = new Date();
+    if (now <= expected) return null;
+    return Math.floor((now.getTime() - expected.getTime()) / 60000);
   };
 
   return (
@@ -172,6 +189,7 @@ export function AttendanceReportsPage() {
                 <option value="IN">Active</option>
                 <option value="MANUAL_OUT">Manual Out</option>
                 <option value="AUTO_OUT">Auto Out</option>
+                <option value="CASCADE_OUT">Cascade Out</option>
                 <option value="INVALID">Invalid</option>
               </Select>
             </div>
@@ -240,21 +258,34 @@ export function AttendanceReportsPage() {
                   <TableHead>Time In</TableHead>
                   <TableHead>Time Out</TableHead>
                   <TableHead>Status</TableHead>
+                  <TableHead>Excess</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {sessions.map((session) => (
-                  <TableRow key={session.id}>
-                    <TableCell className="font-medium">
-                      {session.teacher_name}
-                    </TableCell>
-                    <TableCell>{session.classroom_name}</TableCell>
-                    <TableCell>{session.date}</TableCell>
-                    <TableCell>{formatTime(session.time_in)}</TableCell>
-                    <TableCell>{formatTime(session.time_out)}</TableCell>
-                    <TableCell>{getStatusBadge(session.status)}</TableCell>
-                  </TableRow>
-                ))}
+                {sessions.map((session) => {
+                  const excess = getExcessMinutes(session);
+                  return (
+                    <TableRow key={session.id}>
+                      <TableCell className="font-medium">
+                        {session.teacher_name}
+                      </TableCell>
+                      <TableCell>{session.classroom_name}</TableCell>
+                      <TableCell>{session.date}</TableCell>
+                      <TableCell>{formatTime(session.time_in)}</TableCell>
+                      <TableCell>{formatTime(session.time_out)}</TableCell>
+                      <TableCell>{getStatusBadge(session.status)}</TableCell>
+                      <TableCell>
+                        {excess != null ? (
+                          <span className="text-amber-600 font-medium">
+                            {excess} min
+                          </span>
+                        ) : (
+                          "-"
+                        )}
+                      </TableCell>
+                    </TableRow>
+                  );
+                })}
               </TableBody>
             </Table>
           )}

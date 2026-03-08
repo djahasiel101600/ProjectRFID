@@ -101,6 +101,7 @@ class AttendanceSession(models.Model):
         ('IN', 'Timed In'),
         ('MANUAL_OUT', 'Manual Time Out'),
         ('AUTO_OUT', 'Auto Timed Out'),
+        ('CASCADE_OUT', 'Cascade Checked Out'),
         ('INVALID', 'Invalid'),
     ]
     
@@ -111,7 +112,7 @@ class AttendanceSession(models.Model):
     time_in = models.DateTimeField(auto_now_add=True) #Adjusted to remove timezone conflicts
     time_out = models.DateTimeField(null=True, blank=True)
     expected_out = models.DateTimeField(null=True, blank=True)
-    status = models.CharField(max_length=10, choices=STATUS_CHOICES, default='IN')
+    status = models.CharField(max_length=12, choices=STATUS_CHOICES, default='IN')
     rfid_uid_used = models.CharField(max_length=50)
     is_override = models.BooleanField(default=False)  # True if used override card to take a vacant slot
     created_at = models.DateTimeField(auto_now_add=True)

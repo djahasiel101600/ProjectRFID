@@ -229,7 +229,7 @@ export function TeacherEnergyPage() {
               <p>No energy data available yet.</p>
               <p className="text-sm mt-2">
                 Data is automatically calculated when attendance sessions end
-                (AUTO_OUT).
+                (MANUAL_OUT, CASCADE_OUT, or AUTO_OUT).
               </p>
               {user?.role === "admin" && (
                 <Button

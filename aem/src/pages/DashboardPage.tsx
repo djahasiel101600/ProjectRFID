@@ -1,5 +1,10 @@
 import { memo } from "react";
-import { useDashboard, useCountdown } from "../hooks/useDashboard";
+import {
+  useDashboard,
+  useCountdown,
+  useRunningSession,
+  formatSeconds,
+} from "../hooks/useDashboard";
 import { RealtimeMetricsChart } from "../components/RealtimeMetricsChart";
 import {
   Card,
@@ -52,6 +57,12 @@ const ClassroomCard = memo(function ClassroomCard({
   powerHistory: PowerReading[];
 }) {
   const { remaining, formatted } = useCountdown(classroom.countdown_seconds);
+  const {
+    formattedElapsed,
+    formattedExcess,
+    isExcess,
+    expectedDurationSeconds,
+  } = useRunningSession(classroom.time_in, classroom.expected_out);
   const deviceOffline = isDeviceOffline(
     classroom.last_power_update,
     classroom.id,
@@ -90,19 +101,37 @@ const ClassroomCard = memo(function ClassroomCard({
           </p>
         </div>
 
-        {/* Countdown Timer */}
-        {classroom.current_teacher && classroom.countdown_seconds !== null && (
+        {/* Session Time: running elapsed with excess highlighted */}
+        {classroom.current_teacher && (
           <div className="mb-4">
             <p className="text-sm text-gray-500 dark:text-gray-400">
-              Time Remaining
+              {isExcess ? "Session Time (excess)" : "Session Time"}
             </p>
-            <p
-              className={`font-mono text-2xl font-bold ${
-                remaining < 300 ? "text-red-500" : "text-green-600"
-              }`}
-            >
-              {formatted}
+            <p className="font-mono text-2xl font-bold">
+              {isExcess && expectedDurationSeconds != null ? (
+                <>
+                  <span className="text-foreground">
+                    {formatSeconds(expectedDurationSeconds)}
+                  </span>
+                  <span className="text-amber-600"> + {formattedExcess}</span>
+                </>
+              ) : (
+                <span
+                  className={
+                    classroom.countdown_seconds != null && remaining < 300
+                      ? "text-red-500"
+                      : "text-green-600"
+                  }
+                >
+                  {formattedElapsed}
+                </span>
+              )}
             </p>
+            {!isExcess && classroom.countdown_seconds != null && (
+              <p className="text-xs text-gray-400 mt-0.5">
+                {remaining < 300 ? "Ends soon" : "Remaining"}: {formatted}
+              </p>
+            )}
           </div>
         )}
 
