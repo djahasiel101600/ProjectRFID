@@ -112,12 +112,22 @@ class IoTConsumer(AsyncWebsocketConsumer):
     
     async def receive(self, text_data):
         """Handle incoming data from ESP32 devices."""
+        # Keepalive: accept raw "ping" or {"type":"ping"} so connection is not closed on invalid JSON
+        text_stripped = text_data.strip() if text_data else ""
+        if text_stripped == "ping":
+            await self.send(text_data=json.dumps({'status': 'ok', 'message': 'pong'}))
+            return
+
         try:
             data = json.loads(text_data)
-            print(f"[IoT] Raw data received: {data}")  # DEBUG
-            
             msg_type = data.get('type')
-            
+            if msg_type != 'ping':
+                print(f"[IoT] Raw data received: {data}")  # DEBUG
+
+            if msg_type == 'ping':
+                await self.send(text_data=json.dumps({'status': 'ok', 'message': 'pong'}))
+                return
+
             # Handle scan mode messages
             if msg_type == 'scan_result':
                 rfid_uid = data.get('rfid_uid')

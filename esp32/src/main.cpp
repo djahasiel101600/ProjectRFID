@@ -687,8 +687,12 @@ void sendHeartbeat()
 
 void sendWsPing()
 {
-    // Send a simple ping message
-    if (webSocket.sendTXT("ping"))
+    // Send JSON ping so server can reply with pong (keeps connection alive without triggering Invalid JSON)
+    StaticJsonDocument<32> doc;
+    doc["type"] = "ping";
+    char buffer[32];
+    size_t len = serializeJson(doc, buffer, sizeof(buffer));
+    if (webSocket.sendTXT(buffer, len))
     {
         wsLastActivity = millis();
     }
