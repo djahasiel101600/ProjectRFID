@@ -161,7 +161,9 @@ class IoTConsumer(AsyncWebsocketConsumer):
                 quiescent = data.get('quiescent_voltage')
                 if quiescent is not None:
                     await self.save_calibration_quiescent(quiescent)
-                await self.send(text_data=json.dumps({'status': 'ok', 'message': 'Calibration saved'}))
+                    await self.send(text_data=json.dumps({'status': 'ok', 'message': 'Calibration saved'}))
+                else:
+                    await self.send(text_data=json.dumps({'status': 'ok', 'message': 'No quiescent_voltage in result, nothing to save'}))
                 return
             
             # Normal processing for attendance/power data

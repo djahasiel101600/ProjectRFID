@@ -1827,6 +1827,8 @@ function SensorCalibrationTab() {
         type: "success",
         message: "Calibrate command sent. Ensure NO load on the circuit, then check device LCD.",
       });
+      // Refetch calibration after delay so form shows updated quiescent_voltage once device replies
+      setTimeout(() => loadData(), 2500);
     } catch (err: unknown) {
       setAlert({ type: "error", message: err instanceof Error ? err.message : "Failed to send command" });
     } finally {
@@ -1913,7 +1915,7 @@ function SensorCalibrationTab() {
                       <p className="text-xs text-gray-500">Set by Calibrate Now or leave empty</p>
                     </div>
                   </div>
-                  <div className="flex gap-2 mt-4">
+                  <div className="flex gap-2 mt-4 flex-wrap items-center">
                     <Button
                       onClick={() => handleSave(c.id)}
                       disabled={savingId === c.id}
@@ -1927,6 +1929,9 @@ function SensorCalibrationTab() {
                     >
                       {calibratingId === c.id ? "Sending…" : "Calibrate Now (zero-point)"}
                     </Button>
+                    <p className="text-xs text-gray-500">
+                      Calibrate Now only has effect when the device for this classroom is online.
+                    </p>
                   </div>
                 </CardContent>
               </Card>
