@@ -50,6 +50,14 @@ class IoTConsumer(AsyncWebsocketConsumer):
                 self.channel_name
             )
         
+        # Send calibration config on connect (if exists)
+        cal_payload = await self.get_calibration_payload()
+        if cal_payload:
+            await self.send(text_data=json.dumps({
+                'type': 'calibration_config',
+                'calibration': cal_payload
+            }))
+        
         print(f"[IoT] ESP32 device connected for classroom {self.classroom_id}")
     
     async def disconnect(self, close_code):
@@ -86,6 +94,21 @@ class IoTConsumer(AsyncWebsocketConsumer):
             'session_id': event.get('session_id'),
             'teacher': event.get('teacher')
         }))
+
+    async def calibration_config(self, event):
+        """Push calibration config to ESP32."""
+        cal = event.get('calibration', {})
+        if cal:
+            print(f"[IoT] Sending calibration_config to classroom {self.classroom_id}")
+            await self.send(text_data=json.dumps({
+                'type': 'calibration_config',
+                'calibration': cal
+            }))
+
+    async def calibrate_command(self, event):
+        """Send calibrate_now command to ESP32."""
+        print(f"[IoT] Sending calibrate_now to classroom {self.classroom_id}")
+        await self.send(text_data=json.dumps({'type': 'calibrate_now'}))
     
     async def receive(self, text_data):
         """Handle incoming data from ESP32 devices."""
@@ -132,6 +155,13 @@ class IoTConsumer(AsyncWebsocketConsumer):
                     'status': 'ok',
                     'message': 'Scan timeout acknowledged'
                 }))
+                return
+
+            elif msg_type == 'calibration_result':
+                quiescent = data.get('quiescent_voltage')
+                if quiescent is not None:
+                    await self.save_calibration_quiescent(quiescent)
+                await self.send(text_data=json.dumps({'status': 'ok', 'message': 'Calibration saved'}))
                 return
             
             # Normal processing for attendance/power data
@@ -225,6 +255,29 @@ class IoTConsumer(AsyncWebsocketConsumer):
                 'message': str(e)
             }))
     
+    @database_sync_to_async
+    def save_calibration_quiescent(self, quiescent_voltage):
+        """Save quiescent_voltage from ESP32 calibrate_now result."""
+        from core.models import ClassroomCalibration
+        cal, _ = ClassroomCalibration.objects.get_or_create(
+            classroom_id=self.classroom_id,
+            defaults={'voltage_sensitivity': 483.5, 'current_sensitivity': 0.04,
+                      'nominal_voltage': 230.0, 'add_ampere': 0.0}
+        )
+        cal.quiescent_voltage = float(quiescent_voltage)
+        cal.save()
+        print(f"[IoT] Saved quiescent_voltage={quiescent_voltage} for classroom {self.classroom_id}")
+
+    @database_sync_to_async
+    def get_calibration_payload(self):
+        """Load calibration for this classroom, return dict or None."""
+        from core.models import ClassroomCalibration
+        try:
+            cal = ClassroomCalibration.objects.get(classroom_id=self.classroom_id)
+            return cal.to_esp32_payload()
+        except ClassroomCalibration.DoesNotExist:
+            return None
+
     @database_sync_to_async
     def verify_device(self, token):
         """Verify device token for the classroom."""

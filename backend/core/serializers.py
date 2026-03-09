@@ -1,6 +1,6 @@
 from rest_framework import serializers
 from django.contrib.auth import get_user_model
-from .models import Classroom, Schedule, AttendanceSession, EnergyLog, EnergyAggregation, TeacherEnergyUsage, OverrideRFID, MaintenanceRFID, SystemConfig
+from .models import Classroom, Schedule, AttendanceSession, EnergyLog, EnergyAggregation, TeacherEnergyUsage, OverrideRFID, MaintenanceRFID, SystemConfig, ClassroomCalibration
 
 User = get_user_model()
 
@@ -120,6 +120,21 @@ class ClassroomCreateSerializer(serializers.ModelSerializer):
         model = Classroom
         fields = ['id', 'name', 'device_id', 'device_token', 'is_active']
         read_only_fields = ['id']
+
+
+class ClassroomCalibrationSerializer(serializers.ModelSerializer):
+    """Serializer for classroom sensor calibration."""
+    classroom_name = serializers.CharField(source='classroom.name', read_only=True)
+
+    class Meta:
+        model = ClassroomCalibration
+        fields = [
+            'id', 'classroom', 'classroom_name',
+            'voltage_sensitivity', 'current_sensitivity',
+            'quiescent_voltage', 'nominal_voltage', 'add_ampere',
+            'updated_at'
+        ]
+        read_only_fields = ['id', 'updated_at']
 
 
 class ScheduleSerializer(serializers.ModelSerializer):

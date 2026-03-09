@@ -6,7 +6,8 @@ import type {
   TeacherEnergyUsage, TeacherEnergySummary, TeacherEnergyByClassroom, TeacherEnergyByDate,
   OverrideRFID,
   MaintenanceRFID,
-  SystemConfig
+  SystemConfig,
+  ClassroomCalibration
 } from '../types';
 
 const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000/api';
@@ -267,6 +268,27 @@ class ApiService {
 
   async deleteClassroom(id: number): Promise<void> {
     await this.request(`/classrooms/${id}/`, { method: 'DELETE' });
+  }
+
+  // Classroom calibration (voltage/current sensors)
+  async getClassroomCalibration(classroomId: number): Promise<ClassroomCalibration> {
+    return this.request<ClassroomCalibration>(`/classrooms/${classroomId}/calibration/`);
+  }
+
+  async updateClassroomCalibration(
+    classroomId: number,
+    data: Partial<Pick<ClassroomCalibration, 'voltage_sensitivity' | 'current_sensitivity' | 'quiescent_voltage' | 'nominal_voltage' | 'add_ampere'>>
+  ): Promise<ClassroomCalibration> {
+    return this.request<ClassroomCalibration>(`/classrooms/${classroomId}/calibration/`, {
+      method: 'PATCH',
+      body: JSON.stringify(data),
+    });
+  }
+
+  async calibrateNow(classroomId: number): Promise<{ message: string }> {
+    return this.request<{ message: string }>(`/classrooms/${classroomId}/calibrate-now/`, {
+      method: 'POST',
+    });
   }
 
   // Schedules

@@ -8,7 +8,7 @@ from django.utils import timezone
 from django.db.models import Sum, Avg, Max, Min, Count
 from django.db.models.functions import TruncDate, TruncHour, TruncDay, TruncWeek, TruncMonth
 from datetime import datetime, timedelta
-from .models import Classroom, Schedule, AttendanceSession, EnergyLog, EnergyAggregation, TeacherEnergyUsage, OverrideRFID, MaintenanceRFID, SystemConfig
+from .models import Classroom, Schedule, AttendanceSession, EnergyLog, EnergyAggregation, TeacherEnergyUsage, OverrideRFID, MaintenanceRFID, SystemConfig, ClassroomCalibration
 from .serializers import (
     UserSerializer, UserCreateSerializer, TeacherCreateSerializer,
     ClassroomSerializer, ClassroomCreateSerializer,
@@ -18,7 +18,8 @@ from .serializers import (
     TeacherEnergyUsageSerializer, TeacherEnergySummarySerializer,
     OverrideRFIDSerializer,
     MaintenanceRFIDSerializer,
-    SystemConfigSerializer
+    SystemConfigSerializer,
+    ClassroomCalibrationSerializer
 )
 
 User = get_user_model()
@@ -171,6 +172,50 @@ class ClassroomViewSet(viewsets.ModelViewSet):
         classroom = self.get_object()
         schedules = classroom.schedules.all()
         return Response(ScheduleSerializer(schedules, many=True).data)
+
+    @action(detail=True, methods=['get', 'patch'], url_path='calibration',
+            permission_classes=[permissions.IsAuthenticated, IsAdminUser])
+    def calibration(self, request, pk=None):
+        """Get or update sensor calibration for a classroom."""
+        classroom = self.get_object()
+        cal, _ = ClassroomCalibration.objects.get_or_create(
+            classroom=classroom,
+            defaults={'voltage_sensitivity': 483.5, 'current_sensitivity': 0.04,
+                      'nominal_voltage': 230.0, 'add_ampere': 0.0}
+        )
+        if request.method == 'GET':
+            return Response(ClassroomCalibrationSerializer(cal).data)
+        serializer = ClassroomCalibrationSerializer(cal, data=request.data, partial=True)
+        serializer.is_valid(raise_exception=True)
+        serializer.save()
+        # Push updated calibration to ESP32
+        from channels.layers import get_channel_layer
+        from asgiref.sync import async_to_sync
+        channel_layer = get_channel_layer()
+        if channel_layer:
+            async_to_sync(channel_layer.group_send)(
+                f'iot_classroom_{classroom.id}',
+                {
+                    'type': 'calibration_config',
+                    'calibration': cal.to_esp32_payload()
+                }
+            )
+        return Response(serializer.data)
+
+    @action(detail=True, methods=['post'], url_path='calibrate-now',
+            permission_classes=[permissions.IsAuthenticated, IsAdminUser])
+    def calibrate_now(self, request, pk=None):
+        """Trigger zero-point calibration on the ESP32 (ensure no load)."""
+        classroom = self.get_object()
+        from channels.layers import get_channel_layer
+        from asgiref.sync import async_to_sync
+        channel_layer = get_channel_layer()
+        if channel_layer:
+            async_to_sync(channel_layer.group_send)(
+                f'iot_classroom_{classroom.id}',
+                {'type': 'calibrate_command'}
+            )
+        return Response({'message': 'Calibrate command sent to device. Ensure no load, then check device.'})
 
 
 class ScheduleViewSet(viewsets.ModelViewSet):

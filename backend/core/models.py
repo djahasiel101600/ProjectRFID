@@ -38,6 +38,54 @@ class Classroom(models.Model):
         return self.name
 
 
+class ClassroomCalibration(models.Model):
+    """Per-classroom voltage/current sensor calibration. ESP32 uses these when config is pushed."""
+    classroom = models.OneToOneField(
+        Classroom, on_delete=models.CASCADE, related_name='calibration'
+    )
+    voltage_sensitivity = models.FloatField(
+        default=483.5,
+        help_text="ZMPT101B sensitivity (adjust with multimeter)"
+    )
+    current_sensitivity = models.FloatField(
+        default=0.04,
+        help_text="ACS724: mV per A (e.g. 0.04 = 40mV/A)"
+    )
+    quiescent_voltage = models.FloatField(
+        default=2.5,
+        null=True,
+        blank=True,
+        help_text="Zero-current voltage (set by calibrate_now or leave null for startup auto-cal)"
+    )
+    nominal_voltage = models.FloatField(
+        default=230.0,
+        help_text="Expected AC voltage for capping (110/220/230)"
+    )
+    add_ampere = models.FloatField(
+        default=0.0,
+        help_text="Offset to add to current reading (A)"
+    )
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        db_table = 'classroom_calibration'
+
+    def __str__(self):
+        return f"Calibration for {self.classroom.name}"
+
+    def to_esp32_payload(self):
+        """Format for WebSocket calibration_config message."""
+        payload = {
+            'voltage_sensitivity': self.voltage_sensitivity,
+            'current_sensitivity': self.current_sensitivity,
+            'nominal_voltage': self.nominal_voltage,
+            'add_ampere': self.add_ampere,
+        }
+        if self.quiescent_voltage is not None:
+            payload['quiescent_voltage'] = self.quiescent_voltage
+        return payload
+
+
 class Schedule(models.Model):
     """Teacher schedule for a specific classroom."""
     DAY_CHOICES = [

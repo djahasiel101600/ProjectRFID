@@ -99,6 +99,18 @@ export interface SystemConfig {
   updated_at: string;
 }
 
+export interface ClassroomCalibration {
+  id: number;
+  classroom: number;
+  classroom_name?: string;
+  voltage_sensitivity: number;
+  current_sensitivity: number;
+  quiescent_voltage: number | null;
+  nominal_voltage: number;
+  add_ampere: number;
+  updated_at: string;
+}
+
 export interface Teacher {
   id: number,
   username: string,

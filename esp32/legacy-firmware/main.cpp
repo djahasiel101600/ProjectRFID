@@ -1,4 +1,6 @@
 /* Old Frimware But working: 2026-02-07 */
+/* Updated Code at: 2026-03-04 */
+
 #include <Wire.h>
 #include <time.h>
 
@@ -61,7 +63,7 @@ const char *WIFI_SSID = "PATAOD MOG INYO!";
 const char *WIFI_PASSWORD = "WWW.CUPID.com_1223";
 
 // WebSocket Server Configuration
-const char *WS_HOST = "192.168.254.121";
+const char *WS_HOST = "192.168.254.108";
 const uint16_t WS_PORT = 8000;
 const char *DEVICE_TOKEN = "ESP32-H3WV263437R";
 const int CLASSROOM_ID = 1;
@@ -77,9 +79,9 @@ const int DAYLIGHT_OFFSET_SEC = 0;
 // Power Monitoring Calibration
 #define AC_FREQUENCY 60              // AC line frequency in Hz (50Hz or 60Hz)
 #define ZMPT101B_SENSITIVITY 483.50f // ZMPT101B sensitivity (calibrate with actual voltage)
-#define CURRENT_SENSITIVITY 0.040f   // ACS724: 40mV per A
+#define CURRENT_SENSITIVITY 0.047f   // ACS724: 40mV per A
 #define SAMPLES_PER_CYCLE 30         // Samples per AC cycle (reduced for faster loop)
-#define MEASUREMENT_CYCLES 5         // Number of cycles (balanced: accuracy vs responsiveness)
+#define MEASUREMENT_CYCLES 10         // Number of cycles (balanced: accuracy vs responsiveness)
 #define NOMINAL_VOLTAGE 230.0        // Expected AC voltage (adjust for your region: 110V/220V/230V)
 #define ADC_REFERENCE_VOLTAGE 3.3f   // ESP32 ADC reference voltage
 #define ADC_RESOLUTION 4095.0f       // 12-bit ADC (0-4095)
@@ -101,8 +103,8 @@ const int DAYLIGHT_OFFSET_SEC = 0;
 
 // Energy Conservation - Relay Control
 #define RELAY_PIN 14 // 5V Relay - Controls 230V classroom lights
-#define RFID_REINIT_DELAY_MS 1.5      // Delay after relay ON (EMI settle)
-#define RFID_REINIT_DELAY_OFF_MS 2.5 // Longer delay after relay OFF (worse EMI/kickback)
+#define RFID_REINIT_DELAY_MS 80      // Delay after relay ON (EMI settle)
+#define RFID_REINIT_DELAY_OFF_MS 280 // Longer delay after relay OFF (worse EMI/kickback)
 
 // ============== REAL-TIME OPTIMIZATION ==============
 // Reduced intervals for faster response
@@ -150,12 +152,8 @@ float currentPower = 0.0;
 String currentTeacher = "";
 char statusMessage[17] = "Ready"; // Fixed buffer for LCD
 
-// Current sensor calibration (runtime-updatable from backend)
-float quiescentVoltage = 2.5;
-float voltageSensitivity = ZMPT101B_SENSITIVITY;
-float currentSensitivity = CURRENT_SENSITIVITY;
-float nominalVoltage = NOMINAL_VOLTAGE;
-float addAmpere = ADD_AMPERE;
+// Current sensor calibration
+float quiescentVoltage = 2.5; // Zero-current voltage (calibrated at startup)
 
 // Relay state (for maintenance toggle)
 bool lightsOn = false;
@@ -208,8 +206,6 @@ void enterScanMode();
 void exitScanMode();
 void handleScanMode();
 void sendScanResult(const String &rfidUid);
-void sendCalibrationResult(float quiescentV);
-void runZeroPointCalibration();
 
 // Timeout warning functions
 void handleTimeoutWarning();
@@ -468,39 +464,6 @@ void webSocketEvent(WStype_t type, uint8_t *payload, size_t length)
                     break;
                 }
 
-                // Check for calibration config from backend
-                if (type && strcmp(type, "calibration_config") == 0)
-                {
-                    JsonObject cal = responseDoc["calibration"];
-                    if (!cal.isNull())
-                    {
-                        if (cal.containsKey("voltage_sensitivity"))
-                            voltageSensitivity = cal["voltage_sensitivity"].as<float>();
-                        if (cal.containsKey("current_sensitivity"))
-                            currentSensitivity = cal["current_sensitivity"].as<float>();
-                        if (cal.containsKey("quiescent_voltage"))
-                            quiescentVoltage = cal["quiescent_voltage"].as<float>();
-                        if (cal.containsKey("nominal_voltage"))
-                            nominalVoltage = cal["nominal_voltage"].as<float>();
-                        if (cal.containsKey("add_ampere"))
-                            addAmpere = cal["add_ampere"].as<float>();
-                        voltageSensor.setSensitivity(voltageSensitivity);
-                        Serial.printf("Calibration updated: Vsen=%.1f Csen=%.3f Q=%.3f\n",
-                                      voltageSensitivity, currentSensitivity, quiescentVoltage);
-                        displayMessage("Calibration", "Updated");
-                    }
-                    break;
-                }
-
-                // Check for calibrate_now command
-                if (type && strcmp(type, "calibrate_now") == 0)
-                {
-                    Serial.println("Received calibrate_now - running zero-point calibration");
-                    displayMessage("Calibrating...", "No load please");
-                    runZeroPointCalibration();
-                    break;
-                }
-
                 // Check for attendance response
                 const char *event = responseDoc["event"];
                 Serial.println("[Debug] Checking for attendance response");
@@ -747,49 +710,13 @@ void setupRFID()
 
 // Re-initialize RFID after relay trigger (fallback for RC522 lock/EMI)
 // Must be called from main loop only - never from WebSocket callback
-// Robust: hardware RST pulse, SPI reset, version verification, retries
 void reinitRFID(bool afterRelayOff)
 {
-    const unsigned long emiDelay = afterRelayOff ? RFID_REINIT_DELAY_OFF_MS : RFID_REINIT_DELAY_MS;
-    const int maxRetries = 3;
-
-    // 1. Stop any active RC522 operations
-    rfid.PCD_StopCrypto1();
-    rfid.PICC_HaltA();
-
-    // 2. Let EMI settle
-    delay(emiDelay);
-
-    for (int attempt = 0; attempt < maxRetries; attempt++)
-    {
-        // 3. Hardware reset via RST pin (full chip reset)
-        pinMode(RFID_RST_PIN, OUTPUT);
-        digitalWrite(RFID_RST_PIN, LOW);
-        delay(10);
-        digitalWrite(RFID_RST_PIN, HIGH);
-        delay(10);
-
-        // 4. Reset SPI bus
-        SPI.end();
-        delay(5);
-        SPI.begin();
-
-        // 5. Software init
-        rfid.PCD_Init();
-
-        // 6. Verify chip responded (0x91, 0x92 = MFRC522; 0x88 = FM17522 clone; 0x90 = older)
-        byte version = rfid.PCD_ReadRegister(MFRC522::VersionReg);
-        if (version == 0x91 || version == 0x92 || version == 0x88 || version == 0x90)
-        {
-            Serial.println("RFID re-initialized (post-relay)");
-            return;
-        }
-
-        Serial.printf("[RFID] Reinit attempt %d failed (version=0x%02X)\n", attempt + 1, version);
-        delay(50);
-    }
-
-    Serial.println("[RFID] Reinit failed after retries");
+    unsigned long delayMs = afterRelayOff ? RFID_REINIT_DELAY_OFF_MS : RFID_REINIT_DELAY_MS;
+    delay(delayMs); // Let relay EMI settle (longer for OFF - worse kickback)
+    SPI.begin();
+    rfid.PCD_Init();
+    Serial.println("RFID re-initialized (post-relay)");
 }
 
 // ============== RFID READ (OPTIMIZED) ==============
@@ -885,13 +812,13 @@ void setupPowerMonitoring()
     pinMode(VOLTAGE_SENSOR_PIN, INPUT);
     pinMode(CURRENT_SENSOR_PIN, INPUT);
 
-    // Configure ZMPT101B voltage sensor (use runtime variable)
-    voltageSensor.setSensitivity(voltageSensitivity);
+    // Configure ZMPT101B voltage sensor
+    voltageSensor.setSensitivity(ZMPT101B_SENSITIVITY);
 
     Serial.println("Power monitoring initialized");
     Serial.printf("Voltage sensor (ZMPT101B): GPIO %d @ %dHz\n", VOLTAGE_SENSOR_PIN, AC_FREQUENCY);
-    Serial.printf("Voltage sensitivity: %.1f\n", voltageSensitivity);
-    Serial.printf("Current sensor (ACS724): GPIO %d @ %.1fmV/A\n", CURRENT_SENSOR_PIN, currentSensitivity * 1000);
+    Serial.printf("Voltage sensitivity: %.1f\n", ZMPT101B_SENSITIVITY);
+    Serial.printf("Current sensor (ACS724): GPIO %d @ %.1fmV/A\n", CURRENT_SENSOR_PIN, CURRENT_SENSITIVITY * 1000);
 
     // Calibrate current sensor zero point
     Serial.println("Calibrating current sensor zero point... (ensure no load)");
@@ -912,37 +839,6 @@ void setupPowerMonitoring()
     Serial.println("Note: Calibrate ZMPT101B_SENSITIVITY with multimeter if needed");
 }
 
-// ============== ZERO-POINT CALIBRATION (REMOTE TRIGGER) ==============
-void runZeroPointCalibration()
-{
-    delay(2000);
-    float sum = 0;
-    for (int i = 0; i < 50; i++)
-    {
-        sum += analogRead(CURRENT_SENSOR_PIN);
-        delay(20);
-    }
-    float avgAdc = sum / 50.0;
-    quiescentVoltage = (avgAdc / ADC_RESOLUTION) * ADC_REFERENCE_VOLTAGE;
-    Serial.printf("Zero-point calibration done: quiescent=%.3fV\n", quiescentVoltage);
-    displayMessage("Calibrated!", String(quiescentVoltage, 2).c_str());
-    sendCalibrationResult(quiescentVoltage);
-}
-
-void sendCalibrationResult(float quiescentV)
-{
-    StaticJsonDocument<96> doc;
-    doc["type"] = "calibration_result";
-    doc["quiescent_voltage"] = round(quiescentV * 1000) / 1000.0;
-    char buffer[96];
-    size_t len = serializeJson(doc, buffer, sizeof(buffer));
-    if (webSocket.sendTXT(buffer, len))
-    {
-        wsLastActivity = millis();
-        Serial.println("Sent calibration_result to backend");
-    }
-}
-
 // ============== READ RMS VOLTAGE (ZMPT101B) ==============
 float readRMSVoltage()
 {
@@ -961,8 +857,8 @@ float readRMSVoltage()
     }
     if (voltage > 300)
     {
-        Serial.printf("[DEBUG VOLTAGE] Value %.2fV > 300V, capping to nominal (%.1fV)\n", voltage, nominalVoltage);
-        voltage = nominalVoltage;
+        Serial.printf("[DEBUG VOLTAGE] Value %.2fV > 300V, capping to NOMINAL_VOLTAGE (%.1fV)\n", voltage, NOMINAL_VOLTAGE);
+        voltage = NOMINAL_VOLTAGE; // Cap at reasonable value
     }
 
     return voltage;
@@ -1002,7 +898,8 @@ float readRMSCurrent()
     float rmsVoltage = sqrt(meanSquare);
 
     // Convert RMS voltage to current using sensor sensitivity
-    float current = rmsVoltage / currentSensitivity;
+    // ACS724: 40mV per A, so Current = RMS_Voltage / 0.040
+    float current = rmsVoltage / CURRENT_SENSITIVITY;
 
     // Debug output
     Serial.printf("[DEBUG CURRENT] ADC samples: %d, RMS voltage: %.3fV, Current: %.3fA\n",
@@ -1014,7 +911,7 @@ float readRMSCurrent()
     if (current > 50)
         current = 0; // Safety limit for ACS724 50A sensor
 
-    return current + addAmpere;
+    return current + ADD_AMPERE;
 }
 
 // ============== CALCULATE REAL POWER ==============

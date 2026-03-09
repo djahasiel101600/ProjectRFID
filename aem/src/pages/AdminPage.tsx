@@ -1740,6 +1740,204 @@ function MaintenanceCardsTab() {
   );
 }
 
+// ============== SENSOR CALIBRATION TAB ==============
+function SensorCalibrationTab() {
+  const [classrooms, setClassrooms] = useState<Classroom[]>([]);
+  const [isLoading, setIsLoading] = useState(true);
+  const [savingId, setSavingId] = useState<number | null>(null);
+  const [calibratingId, setCalibratingId] = useState<number | null>(null);
+  const [alert, setAlert] = useState<{ type: "success" | "error"; message: string } | null>(null);
+  const [forms, setForms] = useState<Record<number, {
+    voltage_sensitivity: number;
+    current_sensitivity: number;
+    quiescent_voltage: string;
+    nominal_voltage: number;
+    add_ampere: number;
+  }>>({});
+
+  useEffect(() => { loadData(); }, []);
+
+  const loadData = async () => {
+    try {
+      setIsLoading(true);
+      const cls = await apiService.getClassrooms();
+      setClassrooms(cls);
+      const formMap: Record<number, { voltage_sensitivity: number; current_sensitivity: number; quiescent_voltage: string; nominal_voltage: number; add_ampere: number }> = {};
+      for (const c of cls) {
+        try {
+          const cal = await apiService.getClassroomCalibration(c.id);
+          formMap[c.id] = {
+            voltage_sensitivity: cal.voltage_sensitivity,
+            current_sensitivity: cal.current_sensitivity,
+            quiescent_voltage: cal.quiescent_voltage != null ? String(cal.quiescent_voltage) : "",
+            nominal_voltage: cal.nominal_voltage,
+            add_ampere: cal.add_ampere,
+          };
+        } catch {
+          formMap[c.id] = {
+            voltage_sensitivity: 483.5,
+            current_sensitivity: 0.04,
+            quiescent_voltage: "",
+            nominal_voltage: 230,
+            add_ampere: 0,
+          };
+        }
+      }
+      setForms(formMap);
+    } catch {
+      setAlert({ type: "error", message: "Failed to load data" });
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  const updateForm = (classroomId: number, field: string, value: number | string) => {
+    setForms((prev) => ({
+      ...prev,
+      [classroomId]: { ...prev[classroomId], [field]: value },
+    }));
+  };
+
+  const handleSave = async (classroomId: number) => {
+    const f = forms[classroomId];
+    if (!f) return;
+    try {
+      setSavingId(classroomId);
+      await apiService.updateClassroomCalibration(classroomId, {
+        voltage_sensitivity: f.voltage_sensitivity,
+        current_sensitivity: f.current_sensitivity,
+        quiescent_voltage: f.quiescent_voltage ? parseFloat(f.quiescent_voltage) : undefined,
+        nominal_voltage: f.nominal_voltage,
+        add_ampere: f.add_ampere,
+      });
+      setAlert({ type: "success", message: "Calibration saved and pushed to device" });
+      loadData();
+    } catch (err: unknown) {
+      setAlert({ type: "error", message: err instanceof Error ? err.message : "Failed to save" });
+    } finally {
+      setSavingId(null);
+    }
+  };
+
+  const handleCalibrateNow = async (classroomId: number) => {
+    try {
+      setCalibratingId(classroomId);
+      await apiService.calibrateNow(classroomId);
+      setAlert({
+        type: "success",
+        message: "Calibrate command sent. Ensure NO load on the circuit, then check device LCD.",
+      });
+    } catch (err: unknown) {
+      setAlert({ type: "error", message: err instanceof Error ? err.message : "Failed to send command" });
+    } finally {
+      setCalibratingId(null);
+    }
+  };
+
+  return (
+    <div className="space-y-4">
+      {alert && <Alert type={alert.type} message={alert.message} onClose={() => setAlert(null)} />}
+      <div>
+        <h2 className="text-lg font-semibold">Sensor Calibration</h2>
+        <p className="text-sm text-gray-500">
+          Configure voltage (ZMPT101B) and current (ACS724) sensor calibration per classroom. Values are pushed to the ESP32.
+        </p>
+      </div>
+      {isLoading ? (
+        <div className="py-8 text-center text-gray-500">Loading…</div>
+      ) : classrooms.length === 0 ? (
+        <div className="py-8 text-center text-gray-500">No classrooms. Add a classroom first.</div>
+      ) : (
+        <div className="space-y-4">
+          {classrooms.map((c) => {
+            const f = forms[c.id] || {
+              voltage_sensitivity: 483.5,
+              current_sensitivity: 0.04,
+              quiescent_voltage: "",
+              nominal_voltage: 230,
+              add_ampere: 0,
+            };
+            return (
+              <Card key={c.id}>
+                <CardHeader>
+                  <CardTitle>{c.name}</CardTitle>
+                  <p className="text-xs text-gray-500">{c.device_id}</p>
+                </CardHeader>
+                <CardContent>
+                  <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+                    <div>
+                      <Label>Voltage sensitivity (ZMPT101B)</Label>
+                      <Input
+                        type="number"
+                        step="0.01"
+                        value={f.voltage_sensitivity}
+                        onChange={(e) => updateForm(c.id, "voltage_sensitivity", parseFloat(e.target.value) || 0)}
+                      />
+                    </div>
+                    <div>
+                      <Label>Current sensitivity (mV/A)</Label>
+                      <Input
+                        type="number"
+                        step="0.001"
+                        value={f.current_sensitivity}
+                        onChange={(e) => updateForm(c.id, "current_sensitivity", parseFloat(e.target.value) || 0)}
+                      />
+                    </div>
+                    <div>
+                      <Label>Nominal voltage (V)</Label>
+                      <Input
+                        type="number"
+                        step="1"
+                        value={f.nominal_voltage}
+                        onChange={(e) => updateForm(c.id, "nominal_voltage", parseFloat(e.target.value) || 0)}
+                      />
+                    </div>
+                    <div>
+                      <Label>Add ampere (offset)</Label>
+                      <Input
+                        type="number"
+                        step="0.001"
+                        value={f.add_ampere}
+                        onChange={(e) => updateForm(c.id, "add_ampere", parseFloat(e.target.value) || 0)}
+                      />
+                    </div>
+                    <div className="md:col-span-2">
+                      <Label>Quiescent voltage (optional)</Label>
+                      <Input
+                        type="number"
+                        step="0.001"
+                        placeholder="Leave empty for device auto-cal"
+                        value={f.quiescent_voltage}
+                        onChange={(e) => updateForm(c.id, "quiescent_voltage", e.target.value)}
+                      />
+                      <p className="text-xs text-gray-500">Set by Calibrate Now or leave empty</p>
+                    </div>
+                  </div>
+                  <div className="flex gap-2 mt-4">
+                    <Button
+                      onClick={() => handleSave(c.id)}
+                      disabled={savingId === c.id}
+                    >
+                      {savingId === c.id ? "Saving…" : "Save & Push to Device"}
+                    </Button>
+                    <Button
+                      variant="outline"
+                      onClick={() => handleCalibrateNow(c.id)}
+                      disabled={calibratingId === c.id}
+                    >
+                      {calibratingId === c.id ? "Sending…" : "Calibrate Now (zero-point)"}
+                    </Button>
+                  </div>
+                </CardContent>
+              </Card>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ============== SYSTEM SETTINGS TAB ==============
 function SystemSettingsTab() {
   const [isLoading, setIsLoading] = useState(true);
@@ -1862,7 +2060,7 @@ export function AdminPage() {
       </div>
 
       <Tabs
-        tabs={["Teachers", "Classrooms", "Schedules", "Override Cards", "Maintenance Cards", "System Settings"]}
+        tabs={["Teachers", "Classrooms", "Schedules", "Override Cards", "Maintenance Cards", "Sensor Calibration", "System Settings"]}
         activeTab={activeTab}
         onTabChange={setActiveTab}
       />
@@ -1872,6 +2070,7 @@ export function AdminPage() {
       {activeTab === "Schedules" && <SchedulesTab />}
       {activeTab === "Override Cards" && <OverrideCardsTab />}
       {activeTab === "Maintenance Cards" && <MaintenanceCardsTab />}
+      {activeTab === "Sensor Calibration" && <SensorCalibrationTab />}
       {activeTab === "System Settings" && <SystemSettingsTab />}
     </div>
   );
