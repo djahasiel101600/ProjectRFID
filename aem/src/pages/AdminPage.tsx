@@ -19,7 +19,7 @@ import {
   TableHeader,
   TableRow,
 } from "../components/ui/table";
-import type { User, Classroom, Schedule, OverrideRFID, MaintenanceRFID, SystemConfig } from "../types";
+import type { User, Classroom, Schedule, OverrideRFID, MaintenanceRFID } from "../types";
 import { useRFIDScanner } from "../hooks/useRFIDScanner";
 
 // Modal Component
@@ -1742,7 +1742,6 @@ function MaintenanceCardsTab() {
 
 // ============== SYSTEM SETTINGS TAB ==============
 function SystemSettingsTab() {
-  const [config, setConfig] = useState<SystemConfig | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [isSaving, setIsSaving] = useState(false);
   const [alert, setAlert] = useState<{ type: "success" | "error"; message: string } | null>(null);
@@ -1756,7 +1755,6 @@ function SystemSettingsTab() {
     try {
       setIsLoading(true);
       const data = await apiService.getSystemConfig();
-      setConfig(data);
       setFormData({
         auto_timeout_enabled: data.auto_timeout_enabled,
         auto_timeout_time: data.auto_timeout_time || "22:00",
@@ -1772,11 +1770,10 @@ function SystemSettingsTab() {
     e.preventDefault();
     try {
       setIsSaving(true);
-      const updated = await apiService.updateSystemConfig({
+      await apiService.updateSystemConfig({
         auto_timeout_enabled: formData.auto_timeout_enabled,
         auto_timeout_time: formData.auto_timeout_time,
       });
-      setConfig(updated);
       setAlert({ type: "success", message: "Settings saved successfully" });
     } catch (err: unknown) {
       setAlert({
