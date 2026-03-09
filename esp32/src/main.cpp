@@ -909,7 +909,7 @@ void setupPowerMonitoring()
     quiescentVoltage = (avgAdc / ADC_RESOLUTION) * ADC_REFERENCE_VOLTAGE;
 
     Serial.printf("Current sensor calibrated - Zero point: %.3fV (ADC: %.1f)\n", quiescentVoltage, avgAdc);
-    Serial.println("Note: Calibrate ZMPT101B_SENSITIVITY with multimeter if needed");
+    Serial.println("Note: Calibrate voltage sensitivity with multimeter if needed");
 }
 
 // ============== ZERO-POINT CALIBRATION (REMOTE TRIGGER) ==============
@@ -925,7 +925,9 @@ void runZeroPointCalibration()
     float avgAdc = sum / 50.0;
     quiescentVoltage = (avgAdc / ADC_RESOLUTION) * ADC_REFERENCE_VOLTAGE;
     Serial.printf("Zero-point calibration done: quiescent=%.3fV\n", quiescentVoltage);
-    displayMessage("Calibrated!", String(quiescentVoltage, 2).c_str());
+    char buf[8];
+    snprintf(buf, sizeof(buf), "%.2fV", quiescentVoltage);
+    displayMessage("Calibrated!", buf);
     sendCalibrationResult(quiescentVoltage);
 }
 
@@ -1073,7 +1075,7 @@ void setupIndicators()
     digitalWrite(RELAY_PIN, LOW); // Lights OFF on startup (no active teacher)
 
     Serial.println("Indicators initialized (LED Red: GPIO26, Green: GPIO33, Buzzer: GPIO25)");
-    Serial.println("Relay initialized (Lights Control: GPIO32) - Lights OFF");
+    Serial.printf("Relay initialized (Lights Control: GPIO%d) - Lights OFF\n", RELAY_PIN);
 
     // Power-on test: blink both LEDs and beep
     setLED(LED_RED_PIN, true);
