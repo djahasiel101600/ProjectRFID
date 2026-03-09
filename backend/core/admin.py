@@ -1,6 +1,6 @@
 from django.contrib import admin
 from django.contrib.auth.admin import UserAdmin
-from .models import User, Classroom, Schedule, AttendanceSession, EnergyLog, EnergyAggregation, SystemConfig
+from .models import User, Classroom, Schedule, AttendanceSession, EnergyLog, EnergyAggregation, SystemConfig, OverrideRFID
 
 
 @admin.register(User)
@@ -46,6 +46,15 @@ class EnergyLogAdmin(admin.ModelAdmin):
     list_filter = ['classroom']
     date_hierarchy = 'timestamp'
     readonly_fields = ['timestamp']  # timestamp is auto_now_add
+
+
+@admin.register(OverrideRFID)
+class OverrideRFIDAdmin(admin.ModelAdmin):
+    list_display = ['rfid_uid', 'teacher', 'is_active', 'created_at']
+    list_filter = ['is_active']
+    search_fields = ['rfid_uid', 'teacher__first_name', 'teacher__last_name']
+    autocomplete_fields = ['teacher']
+    list_editable = ['is_active']
 
 
 @admin.register(SystemConfig)
