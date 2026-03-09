@@ -195,19 +195,29 @@ def schedule_session_timeout(session):
 @shared_task(name='core.tasks.auto_timeout_sessions')
 def auto_timeout_sessions():
     """
-    Auto-timeout attendance sessions that have passed their expected end time.
-    Run periodically via Celery Beat (recommended: every 30-60 seconds).
+    Auto-timeout attendance sessions at the configured daily cutoff time.
+    When enabled, teachers who forgot to tap out are auto-timed out at the
+    configured time (e.g., 10:00 PM). Excess time stops at that moment.
+    Run periodically via Celery Beat (e.g., every minute).
     """
-    from core.models import AttendanceSession
-    
+    from core.models import AttendanceSession, SystemConfig
+    from core.services.energy_calculation import calculate_teacher_energy_for_session
+
+    config = SystemConfig.load()
+    if not config.auto_timeout_enabled:
+        return 'Auto-timeout disabled, skipped'
+
     # Get current time in local timezone
     now_local = timezone.localtime(timezone.now())
-    
-    # Find all sessions that should be timed out
-    # Compare with local time since expected_out should be in local timezone
+    current_time = now_local.time()
+
+    # Only run when current time is at or past the configured cutoff
+    if current_time < config.auto_timeout_time:
+        return f'Before cutoff time ({config.auto_timeout_time}), skipped'
+
+    # Timeout all sessions still IN (teachers who forgot to tap out)
     sessions_to_timeout = AttendanceSession.objects.filter(
-        status='IN',
-        expected_out__lte=now_local
+        status='IN'
     ).select_related('teacher', 'classroom')
     
     count = 0
@@ -215,9 +225,15 @@ def auto_timeout_sessions():
     
     for session in sessions_to_timeout:
         session.status = 'AUTO_OUT'
-        session.time_out = now_local  # Use current time for timeout
+        session.time_out = now_local
         session.save()
-        
+
+        # Calculate energy for completed session
+        try:
+            calculate_teacher_energy_for_session(session)
+        except Exception as e:
+            logger.error(f"Could not calculate energy for session {session.id}: {e}")
+
         # Broadcast auto-timeout event to dashboard
         if channel_layer:
             try:

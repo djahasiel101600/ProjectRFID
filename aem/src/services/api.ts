@@ -5,7 +5,8 @@ import type {
   EnergyLog, EnergyReport, DashboardData, LoginResponse,
   TeacherEnergyUsage, TeacherEnergySummary, TeacherEnergyByClassroom, TeacherEnergyByDate,
   OverrideRFID,
-  MaintenanceRFID
+  MaintenanceRFID,
+  SystemConfig
 } from '../types';
 
 const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000/api';
@@ -226,6 +227,18 @@ class ApiService {
 
   async deleteMaintenanceRFID(id: number): Promise<void> {
     await this.request(`/maintenance-rfids/${id}/`, { method: 'DELETE' });
+  }
+
+  // System config (auto-timeout)
+  async getSystemConfig(): Promise<SystemConfig> {
+    return this.request<SystemConfig>('/system-config/');
+  }
+
+  async updateSystemConfig(data: Partial<Pick<SystemConfig, 'auto_timeout_enabled' | 'auto_timeout_time'>>): Promise<SystemConfig> {
+    return this.request<SystemConfig>('/system-config/', {
+      method: 'PATCH',
+      body: JSON.stringify(data),
+    });
   }
 
   // Classrooms

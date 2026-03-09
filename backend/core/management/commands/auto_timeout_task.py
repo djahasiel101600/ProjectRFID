@@ -1,27 +1,38 @@
 """
 Background tasks for attendance auto-timeout.
 Run with: python manage.py auto_timeout_task
-Or set up with Celery Beat for periodic execution.
+Uses SystemConfig: when enabled, times out sessions at the configured cutoff time (e.g., 10 PM).
+Can also be run periodically via Celery Beat (core.tasks.auto_timeout_sessions).
 """
 
 from django.core.management.base import BaseCommand
 from django.utils import timezone
 from channels.layers import get_channel_layer
 from asgiref.sync import async_to_sync
-from core.models import AttendanceSession
+from core.models import AttendanceSession, SystemConfig
 from core.services.energy_calculation import calculate_teacher_energy_for_session
 
 
 class Command(BaseCommand):
-    help = 'Auto-timeout attendance sessions that have passed their expected end time'
+    help = 'Auto-timeout attendance sessions at configured cutoff time (e.g., 10 PM)'
     
     def handle(self, *args, **options):
-        now = timezone.now()
-        
+        config = SystemConfig.load()
+        if not config.auto_timeout_enabled:
+            self.stdout.write(self.style.WARNING('Auto-timeout is disabled in System Settings. Enable it in Admin → System Settings.'))
+            return
+
+        now_local = timezone.localtime(timezone.now())
+        current_time = now_local.time()
+        if current_time < config.auto_timeout_time:
+            self.stdout.write(
+                self.style.WARNING(f'Current time {current_time} is before cutoff {config.auto_timeout_time}. No sessions timed out.')
+            )
+            return
+
         # Find all sessions that should be timed out
         sessions_to_timeout = AttendanceSession.objects.filter(
-            status='IN',
-            expected_out__lte=now
+            status='IN'
         ).select_related('teacher', 'classroom')
         
         count = 0
@@ -30,7 +41,7 @@ class Command(BaseCommand):
         
         for session in sessions_to_timeout:
             session.status = 'AUTO_OUT'
-            session.time_out = session.expected_out
+            session.time_out = now_local
             session.save()
             
             # Calculate energy usage for this completed session

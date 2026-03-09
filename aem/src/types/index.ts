@@ -91,6 +91,14 @@ export interface OverrideRFID {
   created_at: string;
 }
 
+export interface SystemConfig {
+  id: number;
+  auto_timeout_enabled: boolean;
+  auto_timeout_time: string; // "HH:mm" e.g. "22:00"
+  auto_timeout_time_display?: string;
+  updated_at: string;
+}
+
 export interface Teacher {
   id: number,
   username: string,

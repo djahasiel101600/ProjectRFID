@@ -1,6 +1,6 @@
 from rest_framework import serializers
 from django.contrib.auth import get_user_model
-from .models import Classroom, Schedule, AttendanceSession, EnergyLog, EnergyAggregation, TeacherEnergyUsage, OverrideRFID, MaintenanceRFID
+from .models import Classroom, Schedule, AttendanceSession, EnergyLog, EnergyAggregation, TeacherEnergyUsage, OverrideRFID, MaintenanceRFID, SystemConfig
 
 User = get_user_model()
 
@@ -229,6 +229,45 @@ class OverrideRFIDSerializer(serializers.ModelSerializer):
         model = OverrideRFID
         fields = ['id', 'rfid_uid', 'teacher', 'teacher_name', 'is_active', 'created_at']
         read_only_fields = ['id', 'created_at']
+
+
+class SystemConfigSerializer(serializers.ModelSerializer):
+    """Serializer for system configuration (auto-timeout settings)."""
+    auto_timeout_time_display = serializers.SerializerMethodField()
+
+    class Meta:
+        model = SystemConfig
+        fields = ['id', 'auto_timeout_enabled', 'auto_timeout_time', 'auto_timeout_time_display', 'updated_at']
+        read_only_fields = ['id', 'updated_at']
+
+    def get_auto_timeout_time_display(self, obj):
+        """Return time as HH:mm for display (e.g., '22:00')."""
+        if obj.auto_timeout_time:
+            return obj.auto_timeout_time.strftime('%H:%M')
+        return '22:00'
+
+    def to_representation(self, instance):
+        data = super().to_representation(instance)
+        # Frontend expects auto_timeout_time as "HH:mm" string
+        if instance.auto_timeout_time:
+            data['auto_timeout_time'] = instance.auto_timeout_time.strftime('%H:%M')
+        return data
+
+    def to_internal_value(self, data):
+        # Accept "HH:mm" or "HH:mm:ss" from frontend
+        if 'auto_timeout_time' in data and isinstance(data['auto_timeout_time'], str):
+            t = data['auto_timeout_time'].strip()
+            parts = t.split(':')
+            if len(parts) >= 2:
+                try:
+                    h, m = int(parts[0]), int(parts[1])
+                    s = int(parts[2]) if len(parts) > 2 else 0
+                    from datetime import time
+                    data = data.copy()
+                    data['auto_timeout_time'] = time(h, m, s)
+                except (ValueError, IndexError):
+                    pass
+        return super().to_internal_value(data)
 
 
 class TeacherEnergySummarySerializer(serializers.Serializer):

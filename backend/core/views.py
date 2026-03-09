@@ -8,7 +8,7 @@ from django.utils import timezone
 from django.db.models import Sum, Avg, Max, Min, Count
 from django.db.models.functions import TruncDate, TruncHour, TruncDay, TruncWeek, TruncMonth
 from datetime import datetime, timedelta
-from .models import Classroom, Schedule, AttendanceSession, EnergyLog, EnergyAggregation, TeacherEnergyUsage, OverrideRFID, MaintenanceRFID
+from .models import Classroom, Schedule, AttendanceSession, EnergyLog, EnergyAggregation, TeacherEnergyUsage, OverrideRFID, MaintenanceRFID, SystemConfig
 from .serializers import (
     UserSerializer, UserCreateSerializer, TeacherCreateSerializer,
     ClassroomSerializer, ClassroomCreateSerializer,
@@ -17,7 +17,8 @@ from .serializers import (
     AttendanceReportSerializer, EnergyReportSerializer,
     TeacherEnergyUsageSerializer, TeacherEnergySummarySerializer,
     OverrideRFIDSerializer,
-    MaintenanceRFIDSerializer
+    MaintenanceRFIDSerializer,
+    SystemConfigSerializer
 )
 
 User = get_user_model()
@@ -292,6 +293,23 @@ class OverrideRFIDViewSet(viewsets.ModelViewSet):
     def perform_destroy(self, instance):
         instance.is_active = False
         instance.save()  # Soft delete
+
+
+class SystemConfigView(APIView):
+    """Get or update system configuration (auto-timeout settings). Admin only."""
+    permission_classes = [permissions.IsAuthenticated, IsAdminUser]
+
+    def get(self, request):
+        config = SystemConfig.load()
+        serializer = SystemConfigSerializer(config)
+        return Response(serializer.data)
+
+    def patch(self, request):
+        config = SystemConfig.load()
+        serializer = SystemConfigSerializer(config, data=request.data, partial=True)
+        serializer.is_valid(raise_exception=True)
+        serializer.save()
+        return Response(serializer.data)
 
 
 class EnergyLogViewSet(viewsets.ReadOnlyModelViewSet):

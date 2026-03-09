@@ -1,6 +1,7 @@
 from django.db import models
 from django.contrib.auth.models import AbstractUser
 from django.utils import timezone
+from datetime import time
 
 
 class User(AbstractUser):
@@ -78,6 +79,37 @@ class MaintenanceRFID(models.Model):
     
     def __str__(self):
         return f"Maintenance card {self.rfid_uid}" + (f" ({self.label})" if self.label else "")
+
+
+class SystemConfig(models.Model):
+    """Singleton configuration for system-wide settings. One row (id=1)."""
+    id = models.IntegerField(primary_key=True, default=1, editable=False)
+    auto_timeout_enabled = models.BooleanField(
+        default=False,
+        help_text="When enabled, teachers who forgot to tap out are auto-timed out at the configured time."
+    )
+    auto_timeout_time = models.TimeField(
+        default=time(22, 0),
+        help_text="Time of day (e.g., 22:00 = 10 PM) when active sessions are auto-timed out."
+    )
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        db_table = 'system_config'
+        verbose_name = 'System Configuration'
+        verbose_name_plural = 'System Configuration'
+
+    def save(self, *args, **kwargs):
+        self.pk = 1
+        super().save(*args, **kwargs)
+
+    @classmethod
+    def load(cls):
+        obj, _ = cls.objects.get_or_create(pk=1, defaults={
+            'auto_timeout_enabled': False,
+            'auto_timeout_time': time(22, 0),
+        })
+        return obj
 
 
 class OverrideRFID(models.Model):

@@ -4,7 +4,8 @@ from .views import (
     LoginView, LogoutView, SetupStatusView, RegisterView,
     UserViewSet, ClassroomViewSet,
     ScheduleViewSet, AttendanceSessionViewSet, EnergyLogViewSet,
-    EnergyReportView, DashboardView,     TeacherEnergyViewSet, OverrideRFIDViewSet, MaintenanceRFIDViewSet
+    EnergyReportView, DashboardView, TeacherEnergyViewSet,
+    OverrideRFIDViewSet, MaintenanceRFIDViewSet, SystemConfigView
 )
 
 router = DefaultRouter()
@@ -25,4 +26,5 @@ urlpatterns = [
     path('auth/register/', RegisterView.as_view(), name='register'),
     path('energy/report/', EnergyReportView.as_view(), name='energy-report'),
     path('dashboard/', DashboardView.as_view(), name='dashboard'),
+    path('system-config/', SystemConfigView.as_view(), name='system-config'),
 ]

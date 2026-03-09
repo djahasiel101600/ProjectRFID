@@ -19,7 +19,7 @@ import {
   TableHeader,
   TableRow,
 } from "../components/ui/table";
-import type { User, Classroom, Schedule, OverrideRFID, MaintenanceRFID } from "../types";
+import type { User, Classroom, Schedule, OverrideRFID, MaintenanceRFID, SystemConfig } from "../types";
 import { useRFIDScanner } from "../hooks/useRFIDScanner";
 
 // Modal Component
@@ -1740,6 +1740,117 @@ function MaintenanceCardsTab() {
   );
 }
 
+// ============== SYSTEM SETTINGS TAB ==============
+function SystemSettingsTab() {
+  const [config, setConfig] = useState<SystemConfig | null>(null);
+  const [isLoading, setIsLoading] = useState(true);
+  const [isSaving, setIsSaving] = useState(false);
+  const [alert, setAlert] = useState<{ type: "success" | "error"; message: string } | null>(null);
+  const [formData, setFormData] = useState({ auto_timeout_enabled: false, auto_timeout_time: "22:00" });
+
+  useEffect(() => {
+    loadConfig();
+  }, []);
+
+  const loadConfig = async () => {
+    try {
+      setIsLoading(true);
+      const data = await apiService.getSystemConfig();
+      setConfig(data);
+      setFormData({
+        auto_timeout_enabled: data.auto_timeout_enabled,
+        auto_timeout_time: data.auto_timeout_time || "22:00",
+      });
+    } catch {
+      setAlert({ type: "error", message: "Failed to load system settings" });
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    try {
+      setIsSaving(true);
+      const updated = await apiService.updateSystemConfig({
+        auto_timeout_enabled: formData.auto_timeout_enabled,
+        auto_timeout_time: formData.auto_timeout_time,
+      });
+      setConfig(updated);
+      setAlert({ type: "success", message: "Settings saved successfully" });
+    } catch (err: unknown) {
+      setAlert({
+        type: "error",
+        message: err instanceof Error ? err.message : "Failed to save settings",
+      });
+    } finally {
+      setIsSaving(false);
+    }
+  };
+
+  return (
+    <div className="space-y-4">
+      {alert && <Alert type={alert.type} message={alert.message} onClose={() => setAlert(null)} />}
+      <div>
+        <h2 className="text-lg font-semibold">System Settings</h2>
+        <p className="text-sm text-gray-500">
+          Configure auto-timeout for teachers who forget to tap out
+        </p>
+      </div>
+      {isLoading ? (
+        <div className="py-8 text-center text-gray-500">Loading…</div>
+      ) : (
+        <Card>
+          <CardHeader>
+            <CardTitle>Auto-Timeout</CardTitle>
+            <p className="text-sm text-gray-500">
+              When enabled, teachers who forgot to tap out will be automatically timed out at the configured time each day.
+              Excess time and energy attribution will stop at that moment.
+            </p>
+          </CardHeader>
+          <CardContent>
+            <form onSubmit={handleSubmit} className="space-y-6">
+              <div className="flex items-center gap-3">
+                <input
+                  type="checkbox"
+                  id="auto_timeout_enabled"
+                  checked={formData.auto_timeout_enabled}
+                  onChange={(e) =>
+                    setFormData({ ...formData, auto_timeout_enabled: e.target.checked })
+                  }
+                  className="h-4 w-4 rounded border-gray-300"
+                />
+                <Label htmlFor="auto_timeout_enabled" className="cursor-pointer">
+                  Enable auto-timeout
+                </Label>
+              </div>
+              <div>
+                <Label htmlFor="auto_timeout_time">Auto-timeout time</Label>
+                <Input
+                  id="auto_timeout_time"
+                  type="time"
+                  value={formData.auto_timeout_time}
+                  onChange={(e) =>
+                    setFormData({ ...formData, auto_timeout_time: e.target.value })
+                  }
+                  className="mt-1 w-48"
+                  disabled={!formData.auto_timeout_enabled}
+                />
+                <p className="text-xs text-gray-500 mt-1">
+                  e.g., 22:00 = 10:00 PM. Sessions still active at this time will be auto-timed out.
+                </p>
+              </div>
+              <Button type="submit" disabled={isSaving}>
+                {isSaving ? "Saving…" : "Save Settings"}
+              </Button>
+            </form>
+          </CardContent>
+        </Card>
+      )}
+    </div>
+  );
+}
+
 // ============== MAIN ADMIN PAGE ==============
 export function AdminPage() {
   const [activeTab, setActiveTab] = useState("Teachers");
@@ -1754,7 +1865,7 @@ export function AdminPage() {
       </div>
 
       <Tabs
-        tabs={["Teachers", "Classrooms", "Schedules", "Override Cards", "Maintenance Cards"]}
+        tabs={["Teachers", "Classrooms", "Schedules", "Override Cards", "Maintenance Cards", "System Settings"]}
         activeTab={activeTab}
         onTabChange={setActiveTab}
       />
@@ -1764,6 +1875,7 @@ export function AdminPage() {
       {activeTab === "Schedules" && <SchedulesTab />}
       {activeTab === "Override Cards" && <OverrideCardsTab />}
       {activeTab === "Maintenance Cards" && <MaintenanceCardsTab />}
+      {activeTab === "System Settings" && <SystemSettingsTab />}
     </div>
   );
 }

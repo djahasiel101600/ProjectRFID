@@ -1,6 +1,6 @@
 from django.contrib import admin
 from django.contrib.auth.admin import UserAdmin
-from .models import User, Classroom, Schedule, AttendanceSession, EnergyLog, EnergyAggregation
+from .models import User, Classroom, Schedule, AttendanceSession, EnergyLog, EnergyAggregation, SystemConfig
 
 
 @admin.register(User)
@@ -46,6 +46,18 @@ class EnergyLogAdmin(admin.ModelAdmin):
     list_filter = ['classroom']
     date_hierarchy = 'timestamp'
     readonly_fields = ['timestamp']  # timestamp is auto_now_add
+
+
+@admin.register(SystemConfig)
+class SystemConfigAdmin(admin.ModelAdmin):
+    list_display = ['id', 'auto_timeout_enabled', 'auto_timeout_time', 'updated_at']
+    list_editable = ['auto_timeout_enabled', 'auto_timeout_time']
+
+    def has_add_permission(self, request):
+        return not SystemConfig.objects.exists()
+
+    def has_delete_permission(self, request, obj=None):
+        return False
 
 
 @admin.register(EnergyAggregation)
