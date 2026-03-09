@@ -61,7 +61,7 @@ const char *WIFI_SSID = "PATAOD MOG INYO!";
 const char *WIFI_PASSWORD = "WWW.CUPID.com_1223";
 
 // WebSocket Server Configuration
-const char *WS_HOST = "192.168.254.121";
+const char *WS_HOST = "192.168.254.108";
 const uint16_t WS_PORT = 8000;
 const char *DEVICE_TOKEN = "ESP32-H3WV263437R";
 const int CLASSROOM_ID = 1;
@@ -205,8 +205,6 @@ void exitScanMode();
 void handleScanMode();
 void sendScanResult(const String &rfidUid);
 
-// Timeout warning functions
-void handleTimeoutWarning();
 void handleTimeoutFinal();
 
 // ============== SETUP ==============
@@ -446,15 +444,7 @@ void webSocketEvent(WStype_t type, uint8_t *payload, size_t length)
                     break;
                 }
 
-                // Check for timeout warning (5 minutes before auto-out)
-                if (type && strcmp(type, "timeout_warning") == 0)
-                {
-                    Serial.println("Received timeout warning - 5 minutes remaining!");
-                    handleTimeoutWarning();
-                    break;
-                }
-
-                // Check for final timeout notification
+                // Check for final timeout notification (daily auto-out from system)
                 if (type && strcmp(type, "timeout_final") == 0)
                 {
                     Serial.println("Received final timeout notification");
@@ -1210,40 +1200,7 @@ void sendScanResult(const String &rfidUid)
     }
 }
 
-// Handle timeout warning (5 minutes before auto-out)
-void handleTimeoutWarning()
-{
-    Serial.println("Timeout warning activated!");
-
-    // Display warning message on LCD
-    displayMessage("WARNING!", "5 min to timeout");
-
-    // Warning indicator: Red LED slow blink pattern (3 times)
-    for (int i = 0; i < 3; i++)
-    {
-        setLED(LED_RED_PIN, true);
-        delay(300);
-        setLED(LED_RED_PIN, false);
-        delay(300);
-    }
-
-    // Warning sound: Two long beeps
-    beep(400);
-    delay(200);
-    beep(400);
-    delay(200);
-
-    // Keep red LED blinking slowly to indicate warning state
-    setLED(LED_RED_PIN, true);
-    delay(500);
-    setLED(LED_RED_PIN, false);
-
-    // Restore display after a moment
-    delay(2000);
-    displayMessage("Time Warning", currentTeacher.length() > 0 ? currentTeacher.c_str() : "Active Session");
-}
-
-// Handle final timeout notification
+// Handle final timeout notification (daily auto-out or system-triggered session end)
 void handleTimeoutFinal()
 {
     Serial.println("Session timed out!");

@@ -50,7 +50,7 @@ class Command(BaseCommand):
                 energy_count += 1
                 self.stdout.write(f'Calculated energy for {session.teacher}: {energy_usage.total_kwh} kWh')
             
-            # Broadcast auto-timeout event
+            # Broadcast auto-timeout event to dashboard and to IoT (ESP32)
             if channel_layer:
                 async_to_sync(channel_layer.group_send)(
                     f'dashboard_classroom_{session.classroom_id}',
@@ -65,6 +65,15 @@ class Command(BaseCommand):
                             'time_out': session.time_out.strftime('%H:%M'),
                             'energy_kwh': float(energy_usage.total_kwh) if energy_usage else None
                         }
+                    }
+                )
+                # Notify ESP32 so it turns off lights and shows "Session Ended"
+                async_to_sync(channel_layer.group_send)(
+                    f'iot_classroom_{session.classroom_id}',
+                    {
+                        'type': 'timeout_notification',
+                        'session_id': session.id,
+                        'teacher': session.teacher.get_full_name()
                     }
                 )
             
