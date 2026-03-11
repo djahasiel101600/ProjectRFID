@@ -1,50 +1,28 @@
-/* Old Frimware But working: 2026-02-07 */
-#include <Wire.h>
-#include <time.h>
-
 /**
  * IoT Attendance & Energy Monitoring System - ESP32 Firmware
  *
- * Hardware:
+ * Hardware (choose one via USE_PZEM_004T):
+ * - Option A (USE_PZEM_004T=0): ZMPT101B (voltage) + ACS724 (current) on ADC
+ * - Option B (USE_PZEM_004T=1): PZEM-004T v3 over UART (voltage, current, power from module)
+ *
+ * Common:
  * - ESP32 Development Board
  * - MFRC522 RFID Reader (SPI)
  * - I2C 16x2 LCD Display
- * - ZMPT101B Voltage Sensor (for AC voltage measurement)
- * - ACS724 Current Sensor (for AC current measurement)
  *
- * Wiring:
- * RFID RC522:
- *   - SDA  -> GPIO 5
- *   - SCK  -> GPIO 18
- *   - MOSI -> GPIO 23
- *   - MISO -> GPIO 19
- *   - RST  -> GPIO 27
- *   - 3.3V -> 3.3V
- *   - GND  -> GND
- *
- * I2C LCD (16x2):
- *   - SDA -> GPIO 21
- *   - SCL -> GPIO 22
- *   - VCC -> 5V
- *   - GND -> GND
- *
-
- * Voltage Sensor – ZMPT101B (Analog)
+ * ZMPT101B (when USE_PZEM_004T=0):
  *   - OUT  -> GPIO 34  (ADC1_CH6)
- *   - VCC  -> 5V
- *   - GND  -> GND
- *
- * Current Sensor – ACS724 (Analog)
+ * ACS724 (when USE_PZEM_004T=0):
  *   - OUT  -> GPIO 35  (ADC1_CH7)
- *   - VCC  -> 5V
- *   - GND  -> GND
  *
- * Passive Buzzer
- *    + → GPIO 25
- *    - → GND
-
-
+ * PZEM-004T (when USE_PZEM_004T=1):
+ *   - ESP32 RX (e.g. GPIO 16) -> PZEM TX
+ *   - ESP32 TX (e.g. GPIO 17) -> PZEM RX
+ *   - GND -> PZEM GND
  */
+
+// Set to 1 to use PZEM-004T instead of ZMPT101B + ACS724 (same backend contract: voltage, current, power)
+#define USE_PZEM_004T 0
 
 #include <Arduino.h>
 #include <WiFi.h>
@@ -53,7 +31,11 @@
 #include <SPI.h>
 #include <MFRC522.h>
 #include <LiquidCrystal_I2C.h>
+#if USE_PZEM_004T
+#include <MycilaPZEM.h>
+#else
 #include <ZMPT101B.h>
+#endif
 
 // ============== CONFIGURATION ==============
 // WiFi Configuration
@@ -88,8 +70,13 @@ const int DAYLIGHT_OFFSET_SEC = 0;
 // ============== PIN DEFINITIONS ==============
 #define RFID_SS_PIN 5
 #define RFID_RST_PIN 27
+#if USE_PZEM_004T
+#define PZEM_RX_PIN 16  // ESP32 RX <- PZEM TX
+#define PZEM_TX_PIN 17  // ESP32 TX -> PZEM RX
+#else
 #define VOLTAGE_SENSOR_PIN 34 // ZMPT101B - ADC1_CH6
 #define CURRENT_SENSOR_PIN 35 // ACS724 - ADC1_CH7
+#endif
 #define LCD_ADDRESS 0x27
 #define LCD_COLUMNS 16
 #define LCD_ROWS 2
@@ -122,7 +109,14 @@ const int DAYLIGHT_OFFSET_SEC = 0;
 WebSocketsClient webSocket;
 MFRC522 rfid(RFID_SS_PIN, RFID_RST_PIN);
 LiquidCrystal_I2C lcd(LCD_ADDRESS, LCD_COLUMNS, LCD_ROWS);
+#if USE_PZEM_004T
+Mycila::PZEM pzem;
+float lastPzemVoltage = 0;
+float lastPzemCurrent = 0;
+float lastPzemPower = 0;
+#else
 ZMPT101B voltageSensor(VOLTAGE_SENSOR_PIN, AC_FREQUENCY);
+#endif
 
 // ============== STATE VARIABLES ==============
 volatile bool wsConnected = false; // volatile for interrupt safety
@@ -150,7 +144,7 @@ float currentPower = 0.0;
 String currentTeacher = "";
 char statusMessage[17] = "Ready"; // Fixed buffer for LCD
 
-// Current sensor calibration (runtime-updatable from backend)
+// Current sensor calibration (runtime-updatable from backend; PZEM ignores sensitivity/quiescent)
 float quiescentVoltage = 2.5;
 float voltageSensitivity = ZMPT101B_SENSITIVITY;
 float currentSensitivity = CURRENT_SENSITIVITY;
@@ -186,6 +180,9 @@ String readRFID();
 float readRMSVoltage();
 float readRMSCurrent();
 float calculatePower();
+#if USE_PZEM_004T
+float readPowerFromPzem();
+#endif
 void updateLCD();
 void displayMessage(const char *line1, const char *line2 = "");
 String formatTime();
@@ -245,7 +242,11 @@ void loop()
     // 1. Handle WebSocket events FIRST (highest priority)
     webSocket.loop();
 
-    // 1b. Perform deferred RFID reinit (must run outside WS callback to avoid freeze)
+#if USE_PZEM_004T
+    pzem.loop();  // Let PZEM async driver process UART
+#endif
+
+    // 1b. Perform deferred RFID reinit
     if (reinitRfidRequested)
     {
         reinitRfidRequested = false;
@@ -281,10 +282,16 @@ void loop()
     {
         lastPowerRead = currentMillis;
 
+#if USE_PZEM_004T
+        currentVoltage = readRMSVoltage();
+        currentCurrent = readRMSCurrent();
+        currentPower = readPowerFromPzem();  // Use PZEM active power when available
+#else
         // Read voltage and current separately
         currentVoltage = readRMSVoltage();
         currentCurrent = readRMSCurrent();
         currentPower = currentVoltage * currentCurrent;
+#endif
 
         if (wsConnected)
         {
@@ -464,30 +471,41 @@ void webSocketEvent(WStype_t type, uint8_t *payload, size_t length)
                     JsonObject cal = responseDoc["calibration"];
                     if (!cal.isNull())
                     {
+                        if (cal.containsKey("nominal_voltage"))
+                            nominalVoltage = cal["nominal_voltage"].as<float>();
+                        if (cal.containsKey("add_ampere"))
+                            addAmpere = cal["add_ampere"].as<float>();
+#if !USE_PZEM_004T
                         if (cal.containsKey("voltage_sensitivity"))
                             voltageSensitivity = cal["voltage_sensitivity"].as<float>();
                         if (cal.containsKey("current_sensitivity"))
                             currentSensitivity = cal["current_sensitivity"].as<float>();
                         if (cal.containsKey("quiescent_voltage"))
                             quiescentVoltage = cal["quiescent_voltage"].as<float>();
-                        if (cal.containsKey("nominal_voltage"))
-                            nominalVoltage = cal["nominal_voltage"].as<float>();
-                        if (cal.containsKey("add_ampere"))
-                            addAmpere = cal["add_ampere"].as<float>();
                         voltageSensor.setSensitivity(voltageSensitivity);
                         Serial.printf("Calibration updated: Vsen=%.1f Csen=%.3f Q=%.3f\n",
                                       voltageSensitivity, currentSensitivity, quiescentVoltage);
+#else
+                        Serial.printf("Calibration updated (PZEM): nominal=%.1fV add=%.3fA\n",
+                                      nominalVoltage, addAmpere);
+#endif
                         displayMessage("Calibration", "Updated");
                     }
                     break;
                 }
 
-                // Check for calibrate_now command
+                // Check for calibrate_now command (no-op for PZEM; ZMPT/ACS724 run zero-point cal)
                 if (type && strcmp(type, "calibrate_now") == 0)
                 {
+#if USE_PZEM_004T
+                    Serial.println("Received calibrate_now - PZEM has no zero-point cal, sending ack");
+                    displayMessage("PZEM", "No cal needed");
+                    sendCalibrationResult(0.0f);  // Backend expects a result; 0 = N/A for PZEM
+#else
                     Serial.println("Received calibrate_now - running zero-point calibration");
                     displayMessage("Calibrating...", "No load please");
                     runZeroPointCalibration();
+#endif
                     break;
                 }
 
@@ -869,6 +887,22 @@ void updateLCD()
 // ============== POWER MONITORING SETUP ==============
 void setupPowerMonitoring()
 {
+#if USE_PZEM_004T
+    Serial.println("Power monitoring: PZEM-004T (UART)");
+    Serial.printf("PZEM RX=GPIO%d TX=GPIO%d\n", PZEM_RX_PIN, PZEM_TX_PIN);
+    pzem.begin(Serial2, PZEM_RX_PIN, PZEM_TX_PIN, MYCILA_PZEM_ADDRESS_GENERAL, true);
+    pzem.setCallback([](const Mycila::PZEM::EventType evt, const Mycila::PZEM::Data &data) {
+        if (evt == Mycila::PZEM::EventType::EVT_READ) {
+            if (!isnan(data.voltage))
+                lastPzemVoltage = data.voltage;
+            if (!isnan(data.current))
+                lastPzemCurrent = data.current;
+            if (!isnan(data.activePower))
+                lastPzemPower = data.activePower;
+        }
+    });
+    displayMessage("PZEM-004T", "Ready");
+#else
     // Configure ADC for 12-bit resolution (0-4095)
     analogReadResolution(12);
 
@@ -904,9 +938,11 @@ void setupPowerMonitoring()
 
     Serial.printf("Current sensor calibrated - Zero point: %.3fV (ADC: %.1f)\n", quiescentVoltage, avgAdc);
     Serial.println("Note: Calibrate voltage sensitivity with multimeter if needed");
+#endif
 }
 
 // ============== ZERO-POINT CALIBRATION (REMOTE TRIGGER) ==============
+#if !USE_PZEM_004T
 void runZeroPointCalibration()
 {
     delay(2000);
@@ -924,6 +960,7 @@ void runZeroPointCalibration()
     displayMessage("Calibrated!", buf);
     sendCalibrationResult(quiescentVoltage);
 }
+#endif
 
 void sendCalibrationResult(float quiescentV)
 {
@@ -939,9 +976,17 @@ void sendCalibrationResult(float quiescentV)
     }
 }
 
-// ============== READ RMS VOLTAGE (ZMPT101B) ==============
+// ============== READ RMS VOLTAGE (ZMPT101B) / PZEM ==============
 float readRMSVoltage()
 {
+#if USE_PZEM_004T
+    float v = lastPzemVoltage;
+    if (isnan(v) || v < 0)
+        v = 0;
+    if (v > nominalVoltage)
+        v = nominalVoltage;
+    return v;
+#else
     // Use ZMPT101B library to read RMS voltage
     // Read 3 periods for more accurate measurement
     float voltage = voltageSensor.getRmsVoltage(3);
@@ -962,11 +1007,18 @@ float readRMSVoltage()
     }
 
     return voltage;
+#endif
 }
 
-// ============== READ RMS CURRENT (ACS724) ==============
+// ============== READ RMS CURRENT (ACS724) / PZEM ==============
 float readRMSCurrent()
 {
+#if USE_PZEM_004T
+    float c = lastPzemCurrent + addAmpere;
+    if (isnan(c) || c < 0)
+        c = 0;
+    return c;
+#else
     // Calculate sampling interval based on AC frequency
     // For 60Hz with 30 samples per cycle: 1,000,000 / 60 / 30 = 555.5 µs
     float sampleIntervalUs = (1000000.0 / AC_FREQUENCY) / SAMPLES_PER_CYCLE;
@@ -1011,7 +1063,18 @@ float readRMSCurrent()
         current = 0; // Safety limit for ACS724 50A sensor
 
     return current + addAmpere;
+#endif
 }
+
+#if USE_PZEM_004T
+float readPowerFromPzem()
+{
+    float p = lastPzemPower;
+    if (isnan(p) || p < 0)
+        p = 0;
+    return p;
+}
+#endif
 
 // ============== CALCULATE REAL POWER ==============
 float calculatePower()

@@ -7,6 +7,7 @@ Documentation for the IoT-Based Attendance & Energy Consumption Tracking System.
 | Document                                                  | Description                                            |
 | --------------------------------------------------------- | ------------------------------------------------------ |
 | [System Architecture](SYSTEM_ARCHITECTURE.md)             | System design, data flow, components, and interactions |
+| [Power Sensors & PZEM](POWER_SENSORS_AND_PZEM.md)         | ZMPT101B+ACS724 vs PZEM-004T, wiring, calibration, what changed |
 | [Docker Deployment](DOCKER.md)                            | Running the project with Docker Compose                |
 | [PRD (Product Requirements)](PRD.md)                      | Project requirements and specifications                |
 | [RFID Scan Troubleshooting](RFID_SCAN_TROUBLESHOOTING.md) | Troubleshooting guide for the RFID scan feature        |

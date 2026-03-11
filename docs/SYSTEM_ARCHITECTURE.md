@@ -19,8 +19,7 @@ The system automatically tracks **teacher attendance** via RFID and **classroom 
 | Hardware | Purpose |
 |----------|---------|
 | **MFRC522 RFID Reader** | Read teacher RFID cards for attendance |
-| **ZMPT101B** | AC voltage measurement |
-| **ACS724** | AC current measurement |
+| **Power measurement** | **Option A (default):** ZMPT101B (voltage) + ACS724 (current) on ADC. **Option B:** PZEM-004T v3 over UART. See [Power Sensors & PZEM](POWER_SENSORS_AND_PZEM.md). |
 | **I2C 16x2 LCD** | Display status, time, teacher name, power |
 | **LEDs (Red/Green)** | Feedback (scan mode, success, error) |
 | **Passive Buzzer** | Audio feedback |
@@ -30,7 +29,7 @@ The system automatically tracks **teacher attendance** via RFID and **classroom 
 
 1. Connects to WiFi and NTP for time sync.
 2. Opens WebSocket to `/ws/iot/classroom/{id}/?token={device_token}`.
-3. Reads RFID every 50 ms and power (V, I, P) every 5 seconds.
+3. Reads RFID every 50 ms and power (V, I, P) every 1 second (interval configurable).
 4. Sends RFID scans and power readings as JSON over WebSocket.
 5. Receives attendance responses and scan-mode commands.
 6. Turns lights ON when a teacher times in, OFF on manual checkout only (no auto-timeout).

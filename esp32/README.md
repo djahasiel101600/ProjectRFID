@@ -3,8 +3,10 @@
 This firmware connects an ESP32 device to the Django backend for:
 
 - **RFID-based attendance tracking** using RC522 reader
-- **Power consumption monitoring** (simulated via ultrasonic sensor)
+- **Power consumption monitoring** (voltage, current, power) via either **ZMPT101B + ACS724** (ADC) or **PZEM-004T** (UART)
 - **Real-time status display** on I2C LCD
+
+For power sensor options, wiring, and calibration, see **[Power Sensors & PZEM](../docs/POWER_SENSORS_AND_PZEM.md)** in the project docs.
 
 ## Hardware Requirements
 
@@ -13,7 +15,7 @@ This firmware connects an ESP32 device to the Django backend for:
 | ESP32 DevKit         | 1        | Main controller              |
 | MFRC522 RFID Reader  | 1        | Card scanning                |
 | I2C 16x2 LCD Display | 1        | Status display               |
-| HC-SR04 Ultrasonic   | 1        | Power simulation (temporary) |
+| **Power sensors**    | 1 set    | **Option A:** ZMPT101B + ACS724. **Option B:** PZEM-004T v3. See [Power Sensors & PZEM](../docs/POWER_SENSORS_AND_PZEM.md). |
 | Jumper wires         | ~20      | Connections                  |
 | Breadboard           | 1        | Prototyping                  |
 
@@ -41,14 +43,12 @@ This firmware connects an ESP32 device to the Django backend for:
 | VCC     | 5V        |
 | GND     | GND       |
 
-### Ultrasonic HC-SR04
+### Power sensors
 
-| Sensor Pin | ESP32 Pin |
-| ---------- | --------- |
-| TRIG       | GPIO 32   |
-| ECHO       | GPIO 33   |
-| VCC        | 5V        |
-| GND        | GND       |
+See **[Power Sensors & PZEM](../docs/POWER_SENSORS_AND_PZEM.md)** for:
+
+- **Option A (default):** ZMPT101B → GPIO 34, ACS724 → GPIO 35
+- **Option B (PZEM-004T):** RX → GPIO 16, TX → GPIO 17 (Serial2)
 
 ## Software Setup
 
@@ -59,9 +59,12 @@ This firmware connects an ESP32 device to the Django backend for:
 
 ### 2. Configure the Firmware
 
-Edit `src/main.cpp` and update these settings:
+Edit `src/main.cpp` and update at least these settings:
 
 ```cpp
+// Sensor: 0 = ZMPT101B + ACS724 (default), 1 = PZEM-004T
+#define USE_PZEM_004T 0
+
 // WiFi Configuration
 const char* WIFI_SSID = "YOUR_WIFI_SSID";
 const char* WIFI_PASSWORD = "YOUR_WIFI_PASSWORD";
@@ -75,6 +78,8 @@ const int CLASSROOM_ID = 1;  // Your classroom ID
 // Device Configuration
 const char* DEVICE_ID = "ESP32-ROOM-01";
 ```
+
+For PZEM-004T, set `USE_PZEM_004T` to `1` and wire the module as described in [Power Sensors & PZEM](../docs/POWER_SENSORS_AND_PZEM.md).
 
 ### 3. Get Device Token from Django Admin
 
@@ -150,7 +155,7 @@ teacher = User.objects.create_user(
 | `Connecting WiFi` | Connecting to WiFi network       |
 | `WiFi Connected`  | Successfully connected to WiFi   |
 | `WS Connected!`   | WebSocket connected to server    |
-| `Online 150W`     | Connected, current power reading |
+| `Online 150W`     | Connected, current power reading (V, I, P from sensors) |
 | `Offline`         | Not connected to WebSocket       |
 | `Card Detected!`  | RFID card scanned                |
 | `Welcome!`        | Attendance recorded successfully |
@@ -183,28 +188,14 @@ teacher = User.objects.create_user(
 - Verify I2C wiring (SDA, SCL)
 - Adjust contrast potentiometer on LCD module
 
-## Power Simulation
+## Power sensors (ZMPT101B + ACS724 vs PZEM-004T)
 
-Since the actual watt meter isn't available yet, the ultrasonic sensor simulates power:
+The firmware supports two power-measurement options selected at compile time:
 
-- **Distance < 10cm**: ~1000W (high load)
-- **Distance ~200cm**: ~500W (medium load)
-- **Distance > 400cm**: ~50W (base load)
+- **`USE_PZEM_004T 0` (default):** ZMPT101B (voltage) and ACS724 (current) on ADC pins 34 and 35. Calibration (sensitivity, quiescent voltage) and “Calibrate Now” apply.
+- **`USE_PZEM_004T 1`:** PZEM-004T v3 over UART (Serial2, RX=16, TX=17). Module provides voltage, current, and active power; only `nominal_voltage` and `add_ampere` from the backend are used.
 
-This can be used to test the power monitoring feature by moving objects closer/farther from the sensor.
-
-## Future Hardware
-
-When the watt meter becomes available, replace the ultrasonic functions in `main.cpp`:
-
-```cpp
-// Replace readUltrasonicPower() with actual watt meter reading
-float readPowerMeter() {
-    // TODO: Implement actual watt meter reading
-    // Example for PZEM-004T:
-    // return pzem.power();
-}
-```
+See **[Power Sensors & PZEM](../docs/POWER_SENSORS_AND_PZEM.md)** for wiring, calibration differences, and what changed in the code.
 
 ## License
 
