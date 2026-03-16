@@ -84,6 +84,17 @@ When `is_override_mode=True`, no vacant slot, but another teacher is IN:
   - Use that schedule (early takeover).
   - Previous teacher is **CASCADE_OUT**; tapping teacher gets IN with `expected_out` from their next schedule.
 
+### 3.6a Override Mode: Open Room Window
+
+When `is_override_mode=True` and still **no schedule** (no matching schedule, no vacant slot, no early takeover):
+
+- The system checks **Open room windows** (`RoomAvailability`): time windows when the room can be used without a specific teacher schedule.
+- Query: same classroom, same `day_of_week`, `is_active=True`, `start_time <= current_time (+ 15 min)`, `end_time >= current_time`. Use first matching window.
+- If found:
+  - Session is created with `schedule=None`, `expected_out=end_time` of that window, `status=IN`, `is_override=True`.
+  - No schedule is required for that slot; the teacher is using the room during a configured “open” period (e.g. morning when no one is scheduled).
+- **Admin:** Configure open room windows in Django Admin → **Open room windows** (classroom, day, start/end time, optional label). Multiple windows per room per day are allowed.
+
 ### 3.7 Cascade Checkout
 
 Before creating a new valid session, the system checks for any other teacher IN in this classroom:
@@ -94,7 +105,7 @@ Before creating a new valid session, the system checks for any other teacher IN 
 
 ### 3.8 Invalid Scan
 
-If no schedule is found (and no override/vacant/early takeover applies):
+If no schedule is found and no override path applies (no vacant slot, no early takeover, no open room window):
 
 - `AttendanceSession` is still created with `status=INVALID`, `schedule=None`, `expected_out=None`.
 - Event `attendance_invalid` is returned.
@@ -116,6 +127,21 @@ If no schedule is found (and no override/vacant/early takeover applies):
 | Result | Session created for B, `expected_out=9:00`, `is_override=True` |
 
 **Outcome:** Substitute attendance recorded with correct `expected_out`.
+
+### 4.1a Teacher Uses Room During “Open” Window (No Schedule)
+
+**Scenario:** Teacher has only an afternoon schedule. In the morning there are no schedules at all. An **open room window** is configured (e.g. Monday 07:00–12:00 for that classroom). Teacher (with override card) taps in at 08:00.
+
+| Step | System Behavior |
+|------|-----------------|
+| Teacher scans override card | Teacher identified, `is_override_mode=True` |
+| No schedule 08:00 | No matching schedule |
+| Vacant slot check | No schedules exist for that time → no vacant slot |
+| Early takeover | Not applicable (no other teacher IN, or no next schedule) |
+| Open room window check | Finds 07:00–12:00 for this classroom, Monday |
+| Result | Session created with `schedule=None`, `expected_out=12:00`, `is_override=True` |
+
+**Outcome:** Teacher can use the room in the morning; session is valid and expected_out is the end of the open window. No firmware changes; same WebSocket contract.
 
 ---
 

@@ -1,6 +1,6 @@
 from django.contrib import admin
 from django.contrib.auth.admin import UserAdmin
-from .models import User, Classroom, Schedule, AttendanceSession, EnergyLog, EnergyAggregation, SystemConfig, OverrideRFID, ClassroomCalibration
+from .models import User, Classroom, Schedule, AttendanceSession, EnergyLog, EnergyAggregation, SystemConfig, OverrideRFID, ClassroomCalibration, RoomAvailability
 
 
 @admin.register(User)
@@ -29,6 +29,14 @@ class ScheduleAdmin(admin.ModelAdmin):
     list_display = ['teacher', 'classroom', 'day_of_week', 'start_time', 'end_time', 'subject']
     list_filter = ['day_of_week', 'classroom']
     search_fields = ['teacher__username', 'teacher__first_name', 'classroom__name', 'subject']
+
+
+@admin.register(RoomAvailability)
+class RoomAvailabilityAdmin(admin.ModelAdmin):
+    list_display = ['classroom', 'day_of_week', 'start_time', 'end_time', 'label', 'is_active', 'created_at']
+    list_filter = ['day_of_week', 'classroom', 'is_active']
+    search_fields = ['classroom__name', 'label']
+    list_editable = ['is_active']
 
 
 @admin.register(AttendanceSession)

@@ -54,7 +54,7 @@ The system automatically tracks **teacher attendance** via RFID and **classroom 
 
 **Main modules:**
 
-- **`core/models.py`** – User, Classroom, Schedule, AttendanceSession, EnergyLog, EnergyAggregation, TeacherEnergyUsage
+- **`core/models.py`** – User, Classroom, Schedule, RoomAvailability (open room windows), AttendanceSession, EnergyLog, EnergyAggregation, TeacherEnergyUsage
 - **`core/consumers.py`** – IoTConsumer, DashboardConsumer, AdminConsumer
 - **`core/views.py`** – REST views for users, classrooms, schedules, attendance, energy
 - **`core/tasks.py`** – Celery tasks for session timeouts and cleanup

@@ -160,8 +160,40 @@ class SystemConfig(models.Model):
         return obj
 
 
+class RoomAvailability(models.Model):
+    """
+    Open room time windows: periods when a classroom can be used without a specific teacher schedule.
+    Teachers with an override card can tap in during these windows (e.g. morning when no one is scheduled).
+    """
+    DAY_CHOICES = [
+        (0, 'Monday'),
+        (1, 'Tuesday'),
+        (2, 'Wednesday'),
+        (3, 'Thursday'),
+        (4, 'Friday'),
+        (5, 'Saturday'),
+        (6, 'Sunday'),
+    ]
+    classroom = models.ForeignKey(Classroom, on_delete=models.CASCADE, related_name='room_availabilities')
+    day_of_week = models.IntegerField(choices=DAY_CHOICES)
+    start_time = models.TimeField()
+    end_time = models.TimeField()
+    label = models.CharField(max_length=100, blank=True, help_text='Optional label e.g. "Morning open"')
+    is_active = models.BooleanField(default=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        db_table = 'room_availabilities'
+        ordering = ['classroom', 'day_of_week', 'start_time']
+        verbose_name = 'Open room window'
+        verbose_name_plural = 'Open room windows'
+
+    def __str__(self):
+        return f"{self.classroom.name} {self.get_day_of_week_display()} {self.start_time}-{self.end_time}" + (f" ({self.label})" if self.label else "")
+
+
 class OverrideRFID(models.Model):
-    """RFID cards that enable substitute/override mode - teacher can take vacant slots."""
+    """RFID cards that enable substitute/override mode - teacher can take vacant slots or open room windows."""
     rfid_uid = models.CharField(max_length=50, unique=True)
     teacher = models.ForeignKey(User, on_delete=models.CASCADE, related_name='override_rfid_cards')
     is_active = models.BooleanField(default=True)

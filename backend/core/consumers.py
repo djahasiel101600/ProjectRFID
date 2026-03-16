@@ -485,6 +485,7 @@ class IoTConsumer(AsyncWebsocketConsumer):
                     else:
                         print(f"  (No schedules found for today)")
             
+            open_window = None  # Set when override mode uses an open room window (no schedule)
             # Override mode: if no matching schedule, look for vacant slot (another teacher's slot with no one timed in)
             if not schedule and is_override_mode:
                 print(f"\n[RFID DEBUG] Override mode: checking for vacant slots in classroom {classroom.name}")
@@ -528,9 +529,23 @@ class IoTConsumer(AsyncWebsocketConsumer):
                         if next_schedule:
                             schedule = next_schedule
                             print(f"[RFID DEBUG] Early takeover: using next schedule {schedule.start_time} - {schedule.end_time}")
+                
+                # Override + no schedule: check for open room window (room available without a schedule)
+                if not schedule:
+                    from core.models import RoomAvailability
+                    open_window = RoomAvailability.objects.filter(
+                        classroom=classroom,
+                        day_of_week=day_of_week,
+                        is_active=True,
+                        start_time__lte=time_threshold,
+                        end_time__gte=current_time
+                    ).order_by('start_time').first()
+                    if open_window:
+                        print(f"[RFID DEBUG] FOUND open room window: {open_window.start_time} - {open_window.end_time}" + (f" ({open_window.label})" if open_window.label else ""))
             
             # Cascade: before creating session, check out any other teacher IN in this classroom
-            if schedule:
+            valid_session = bool(schedule or open_window)
+            if valid_session:
                 other_sessions = list(AttendanceSession.objects.filter(
                     classroom=classroom,
                     date=today,
@@ -579,11 +594,16 @@ class IoTConsumer(AsyncWebsocketConsumer):
                 status = 'IN'
                 session_is_override = is_override_mode
                 print(f"\n[RFID DEBUG] RESULT: VALID - Creating session with status IN (override={session_is_override})")
+            elif open_window:
+                expected_out = datetime.combine(today, open_window.end_time)
+                status = 'IN'
+                session_is_override = True
+                print(f"\n[RFID DEBUG] RESULT: VALID (open room) - Creating session with status IN, expected_out={expected_out}")
             else:
                 expected_out = None
                 status = 'INVALID'
                 session_is_override = False
-                print(f"\n[RFID DEBUG] RESULT: INVALID - No matching schedule found")
+                print(f"\n[RFID DEBUG] RESULT: INVALID - No matching schedule or open room window found")
             
             print(f"{'='*60}\n")
             
