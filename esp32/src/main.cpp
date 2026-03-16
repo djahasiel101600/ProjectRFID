@@ -243,7 +243,7 @@ void loop()
     webSocket.loop();
 
 #if USE_PZEM_004T
-    pzem.loop();  // Let PZEM async driver process UART
+    // PZEM async driver runs in background task; callback updates lastPzem* (no loop() call)
 #endif
 
     // 1b. Perform deferred RFID reinit

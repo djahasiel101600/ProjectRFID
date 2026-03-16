@@ -75,7 +75,7 @@ Pins are defined in `main.cpp` as `PZEM_RX_PIN` and `PZEM_TX_PIN`; change them i
 | **Pins** | When PZEM: `PZEM_RX_PIN` (16), `PZEM_TX_PIN` (17). When ZMPT/ACS724: `VOLTAGE_SENSOR_PIN` (34), `CURRENT_SENSOR_PIN` (35). |
 | **Globals** | When PZEM: `Mycila::PZEM pzem`, `lastPzemVoltage`, `lastPzemCurrent`, `lastPzemPower`. When ZMPT/ACS724: `ZMPT101B voltageSensor`. |
 | **setupPowerMonitoring()** | PZEM: init Serial2 + PZEM, set async callback to update `lastPzem*`. ZMPT/ACS724: ADC setup, zero-point calibration. |
-| **Main loop** | PZEM: call `pzem.loop()`; power = `readPowerFromPzem()`. ZMPT/ACS724: power = voltage × current. |
+| **Main loop** | PZEM: no call needed (async driver runs in background; callback updates `lastPzem*`). ZMPT/ACS724: power = voltage × current. |
 | **readRMSVoltage() / readRMSCurrent()** | PZEM: return last value from callback (with NaN/range checks). ZMPT/ACS724: unchanged ADC + RMS logic. |
 | **readPowerFromPzem()** | New function only when `USE_PZEM_004T`; returns `lastPzemPower`. |
 | **runZeroPointCalibration()** | Only compiled when `!USE_PZEM_004T`. |
