@@ -14,7 +14,7 @@ import {
   Line,
 } from "recharts";
 import type { EnergyReport } from "../types";
-import { parseLocalDateTime } from "../lib/utils";
+import { parseLocalDateTime, formatIsoWeekRangeLabel } from "../lib/utils";
 
 // Memoized CustomTooltip component - defined outside to prevent recreation on each render
 const CustomTooltip = memo(function CustomTooltip({
@@ -68,11 +68,7 @@ export const EnergyChart = memo(function EnergyChart({
             day: "numeric",
           });
         case "week":
-          return date.toLocaleDateString("en-US", {
-            month: "short",
-            day: "numeric",
-            year: "2-digit",
-          });
+          return formatIsoWeekRangeLabel(period);
         case "month":
           return date.toLocaleDateString("en-US", {
             month: "short",

@@ -31,3 +31,27 @@ export function formatLocalDateTime(dateStr: string | null | undefined): string 
   const date = new Date(dateStr);
   return date.toLocaleString();
 }
+
+/**
+ * ISO-style week: Monday through Sunday containing `period`.
+ * Example: "Mon, Mar 16, 2026 – Sun, Mar 22, 2026"
+ */
+export function formatIsoWeekRangeLabel(period: string): string {
+  const d = parseLocalDateTime(period);
+  if (!d || isNaN(d.getTime())) return period;
+  const monday = new Date(d.getTime());
+  const day = monday.getDay(); // 0 = Sun … 6 = Sat
+  const diff = monday.getDate() - day + (day === 0 ? -6 : 1);
+  monday.setDate(diff);
+  monday.setHours(0, 0, 0, 0);
+  const sunday = new Date(monday);
+  sunday.setDate(sunday.getDate() + 6);
+  const part = (date: Date) =>
+    date.toLocaleDateString('en-US', {
+      weekday: 'short',
+      month: 'short',
+      day: 'numeric',
+      year: 'numeric',
+    });
+  return `${part(monday)} – ${part(sunday)}`;
+}

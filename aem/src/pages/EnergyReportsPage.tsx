@@ -2,7 +2,7 @@ import { useState, useEffect, useMemo } from "react";
 import apiService from "../services/api";
 import { useEnergy } from "../hooks/useEnergy";
 import { EnergyChart } from "../components/EnergyChart";
-import { parseLocalDateTime } from "../lib/utils";
+import { parseLocalDateTime, formatIsoWeekRangeLabel } from "../lib/utils";
 import {
   Card,
   CardContent,
@@ -78,11 +78,7 @@ export function EnergyReportsPage() {
           day: "numeric",
         });
       case "week":
-        return date.toLocaleDateString("en-US", {
-          month: "short",
-          day: "numeric",
-          year: "2-digit",
-        });
+        return formatIsoWeekRangeLabel(period);
       case "month":
         return date.toLocaleDateString("en-US", {
           year: "numeric",
