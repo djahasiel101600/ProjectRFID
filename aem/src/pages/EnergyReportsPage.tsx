@@ -3,6 +3,7 @@ import apiService from "../services/api";
 import { useEnergy } from "../hooks/useEnergy";
 import { EnergyChart } from "../components/EnergyChart";
 import { parseLocalDateTime, formatIsoWeekRangeLabel } from "../lib/utils";
+import { exportEnergyReportsToCsv } from "../lib/exportEnergyReportCsv";
 import {
   Card,
   CardContent,
@@ -89,6 +90,20 @@ export function EnergyReportsPage() {
     }
   };
 
+  const handleGenerateReport = async () => {
+    const data = await refresh();
+    if (!data.length) return;
+    const classroomLabel = selectedClassroom
+      ? classrooms.find((c) => String(c.id) === selectedClassroom)?.name ??
+        `classroom-${selectedClassroom}`
+      : "All classrooms";
+    exportEnergyReportsToCsv(data, {
+      range: selectedRange,
+      classroomLabel,
+      formatPeriod: (p) => formatPeriod(p),
+    });
+  };
+
   return (
     <div className="space-y-6">
       <div className="flex justify-between items-start">
@@ -154,9 +169,10 @@ export function EnergyReportsPage() {
             </div>
             <div className="flex items-end">
               <Button
-                onClick={refresh}
+                onClick={handleGenerateReport}
                 className="w-full"
                 disabled={isRefreshing}
+                title="Refresh data from server and download CSV"
               >
                 {isRefreshing ? "Generating…" : "Generate Report"}
               </Button>

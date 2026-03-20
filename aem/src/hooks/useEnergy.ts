@@ -28,7 +28,7 @@ export function useEnergy(filters: EnergyFilters = {}) {
   const filtersRef = useRef(filters);
   filtersRef.current = filters;
 
-  const fetchData = useCallback(async (showLoading = true): Promise<void> => {
+  const fetchData = useCallback(async (showLoading = true): Promise<EnergyReport[]> => {
     try {
       // Only show loading spinner on initial load, not on refreshes
       if (showLoading && !hasInitialLoadRef.current) {
@@ -43,12 +43,15 @@ export function useEnergy(filters: EnergyFilters = {}) {
       }
 
       const data = await apiService.getEnergyReport(params);
-      setReports(data);
+      const list = Array.isArray(data) ? data : [];
+      setReports(list);
       setError(null);
       setLastUpdate(new Date());
       hasInitialLoadRef.current = true;
+      return list;
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to fetch energy data');
+      return [];
     } finally {
       setIsLoading(false);
     }
@@ -105,11 +108,11 @@ export function useEnergy(filters: EnergyFilters = {}) {
     };
   }, [filters.classroom, debouncedFetchData]);
 
-  const refresh = useCallback(async () => {
+  const refresh = useCallback(async (): Promise<EnergyReport[]> => {
     setIsRefreshing(true);
     try {
       wsService.requestRefresh();
-      await fetchData(false);
+      return await fetchData(false);
     } finally {
       setIsRefreshing(false);
     }
