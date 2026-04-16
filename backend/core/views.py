@@ -470,6 +470,80 @@ class EnergyReportView(APIView):
         return Response(result)
 
 
+class TeacherEnergyBreakdownView(APIView):
+    """Per-teacher kWh grouped into the same time buckets as EnergyReportView."""
+    permission_classes = [permissions.IsAuthenticated]
+
+    def get(self, request):
+        range_type   = request.query_params.get('range', 'day')
+        classroom_id = request.query_params.get('classroom')
+        start_date   = request.query_params.get('start')
+        end_date     = request.query_params.get('end')
+
+        qs = TeacherEnergyUsage.objects.select_related('teacher')
+
+        if classroom_id:
+            qs = qs.filter(classroom_id=classroom_id)
+
+        now = timezone.now()
+        if not start_date:
+            if range_type == 'hour':
+                start_date = now - timedelta(hours=24)
+            elif range_type == 'day':
+                start_date = now - timedelta(days=30)
+            elif range_type == 'week':
+                start_date = now - timedelta(weeks=12)
+            else:
+                start_date = now - timedelta(days=365)
+
+        if isinstance(start_date, str):
+            start_date = datetime.fromisoformat(start_date.replace('Z', '+00:00'))
+        qs = qs.filter(start_time__gte=start_date)
+
+        if end_date:
+            if isinstance(end_date, str):
+                end_date = datetime.fromisoformat(end_date.replace('Z', '+00:00'))
+            qs = qs.filter(end_time__lte=end_date)
+
+        trunc_map = {
+            'hour':  TruncHour,
+            'week':  TruncWeek,
+            'month': TruncMonth,
+        }
+        trunc_func = trunc_map.get(range_type, TruncDay)
+
+        rows = (
+            qs
+            .annotate(period=trunc_func('start_time'))
+            .values(
+                'period', 'teacher',
+                'teacher__first_name', 'teacher__last_name', 'teacher__username',
+            )
+            .annotate(
+                total_kwh=Sum('total_kwh'),
+                avg_watts=Avg('avg_watts'),
+                session_count=Count('id'),
+            )
+            .order_by('period', 'teacher')
+        )
+
+        result = []
+        for row in rows:
+            name = f"{row['teacher__first_name']} {row['teacher__last_name']}".strip()
+            if not name:
+                name = row['teacher__username']
+            result.append({
+                'period':        row['period'].isoformat() if row['period'] else None,
+                'teacher_id':    row['teacher'],
+                'teacher_name':  name,
+                'total_kwh':     round(float(row['total_kwh']  or 0), 4),
+                'avg_watts':     round(float(row['avg_watts']   or 0), 2),
+                'session_count': row['session_count'],
+            })
+
+        return Response(result)
+
+
 class DashboardView(APIView):
     """API view for dashboard data."""
     permission_classes = [permissions.IsAuthenticated]

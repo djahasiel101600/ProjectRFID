@@ -255,3 +255,12 @@ export interface TeacherEnergyByDate {
   avg_watts: number;
   session_count: number;
 }
+
+export interface TeacherEnergyBreakdown {
+  period: string;
+  teacher_id: number;
+  teacher_name: string;
+  total_kwh: number;
+  avg_watts: number;
+  session_count: number;
+}

@@ -13,7 +13,7 @@ import {
   ComposedChart,
   Line,
 } from "recharts";
-import type { EnergyReport } from "../types";
+import type { EnergyReport, TeacherEnergyBreakdown } from "../types";
 import { parseLocalDateTime, formatIsoWeekRangeLabel } from "../lib/utils";
 
 // Memoized CustomTooltip component - defined outside to prevent recreation on each render
@@ -31,7 +31,7 @@ const CustomTooltip = memo(function CustomTooltip({
         {payload.map((entry: any, index: number) => (
           <p key={index} className="text-sm" style={{ color: entry.color }}>
             {entry.name}: {entry.value}{" "}
-            {entry.dataKey.includes("Kwh") ? "kWh" : "W"}
+            {entry.dataKey.includes("Kwh") || entry.dataKey.endsWith("_kwh") ? "kWh" : "W"}
           </p>
         ))}
       </div>
@@ -44,12 +44,18 @@ interface EnergyChartProps {
   data: EnergyReport[];
   range: "hour" | "day" | "week" | "month";
   chartType?: "area" | "bar" | "composed";
+  teacherBreakdown?: TeacherEnergyBreakdown[];
+  hiddenTeachers?: Set<number>;
+  teacherColors?: string[];
 }
 
 export const EnergyChart = memo(function EnergyChart({
   data,
   range,
   chartType = "composed",
+  teacherBreakdown,
+  hiddenTeachers,
+  teacherColors,
 }: EnergyChartProps) {
   // Memoized format period label function based on range
   const formatPeriodLabel = useCallback(
@@ -81,20 +87,69 @@ export const EnergyChart = memo(function EnergyChart({
     [range]
   );
 
-  // Memoized chart data transformation - only recalculates when data or formatPeriodLabel changes
+  // Derive unique teachers from breakdown
+  const uniqueTeachers = useMemo(() => {
+    const seen = new Set<number>();
+    return (teacherBreakdown ?? []).reduce<{ id: number; name: string }[]>(
+      (acc, row) => {
+        if (!seen.has(row.teacher_id)) {
+          seen.add(row.teacher_id);
+          acc.push({ id: row.teacher_id, name: row.teacher_name });
+        }
+        return acc;
+      },
+      []
+    );
+  }, [teacherBreakdown]);
+
+  // Map: formatted-period -> teacher_id -> total_kwh for O(1) lookup
+  const teacherPeriodMap = useMemo(() => {
+    const map = new Map<string, Map<number, number>>();
+    for (const row of teacherBreakdown ?? []) {
+      const label = formatPeriodLabel(row.period);
+      if (!map.has(label)) map.set(label, new Map());
+      map.get(label)!.set(row.teacher_id, row.total_kwh);
+    }
+    return map;
+  }, [teacherBreakdown, formatPeriodLabel]);
+
+  // Memoized chart data transformation - merges teacher kWh values into each period
   const chartData = useMemo(
     () =>
-      data.map((item) => ({
-        period: formatPeriodLabel(item.period),
-        fullPeriod: item.period,
-        totalKwh: Number(item.total_kwh.toFixed(4)),
-        avgWatts: Number(item.avg_watts.toFixed(1)),
-        maxWatts: Number(item.max_watts.toFixed(1)),
-        minWatts: Number(item.min_watts.toFixed(1)),
-        readings: item.reading_count,
-      })),
-    [data, formatPeriodLabel]
+      data.map((item) => {
+        const label = formatPeriodLabel(item.period);
+        const byTeacher = teacherPeriodMap.get(label) ?? new Map<number, number>();
+        const teacherEntries = Object.fromEntries(
+          uniqueTeachers.map((t) => [`t_${t.id}_kwh`, byTeacher.get(t.id) ?? null])
+        );
+        return {
+          period: label,
+          fullPeriod: item.period,
+          totalKwh: Number(item.total_kwh.toFixed(4)),
+          avgWatts: Number(item.avg_watts.toFixed(1)),
+          maxWatts: Number(item.max_watts.toFixed(1)),
+          minWatts: Number(item.min_watts.toFixed(1)),
+          readings: item.reading_count,
+          ...teacherEntries,
+        };
+      }),
+    [data, formatPeriodLabel, teacherPeriodMap, uniqueTeachers]
   );
+
+  // Helper: render a grouped Bar per visible teacher
+  const renderTeacherBars = (yAxisId?: string) =>
+    uniqueTeachers
+      .filter((t) => !(hiddenTeachers ?? new Set()).has(t.id))
+      .map((t, i) => (
+        <Bar
+          key={t.id}
+          {...(yAxisId ? { yAxisId } : {})}
+          dataKey={`t_${t.id}_kwh`}
+          name={`${t.name} (kWh)`}
+          fill={teacherColors?.[i % (teacherColors?.length ?? 20)] ?? "#8b5cf6"}
+          radius={[4, 4, 0, 0]}
+        />
+      ));
 
   if (data.length === 0) {
     return (
@@ -154,6 +209,7 @@ export const EnergyChart = memo(function EnergyChart({
             fillOpacity={1}
             fill="url(#colorAvg)"
           />
+          {renderTeacherBars()}
         </AreaChart>
       </ResponsiveContainer>
     );
@@ -193,6 +249,7 @@ export const EnergyChart = memo(function EnergyChart({
             fill="#10b981"
             radius={[4, 4, 0, 0]}
           />
+          {renderTeacherBars()}
         </BarChart>
       </ResponsiveContainer>
     );
@@ -265,6 +322,7 @@ export const EnergyChart = memo(function EnergyChart({
           strokeDasharray="5 5"
           dot={false}
         />
+        {renderTeacherBars("left")}
       </ComposedChart>
     </ResponsiveContainer>
   );
