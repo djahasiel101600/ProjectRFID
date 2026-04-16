@@ -31,7 +31,9 @@ const CustomTooltip = memo(function CustomTooltip({
         {payload.map((entry: any, index: number) => (
           <p key={index} className="text-sm" style={{ color: entry.color }}>
             {entry.name}: {entry.value}{" "}
-            {entry.dataKey.includes("Kwh") || entry.dataKey.endsWith("_kwh") ? "kWh" : "W"}
+            {entry.dataKey.includes("Kwh") || entry.dataKey.endsWith("_kwh")
+              ? "kWh"
+              : "W"}
           </p>
         ))}
       </div>
@@ -84,7 +86,7 @@ export const EnergyChart = memo(function EnergyChart({
           return period;
       }
     },
-    [range]
+    [range],
   );
 
   // Derive unique teachers from breakdown
@@ -98,7 +100,7 @@ export const EnergyChart = memo(function EnergyChart({
         }
         return acc;
       },
-      []
+      [],
     );
   }, [teacherBreakdown]);
 
@@ -118,9 +120,13 @@ export const EnergyChart = memo(function EnergyChart({
     () =>
       data.map((item) => {
         const label = formatPeriodLabel(item.period);
-        const byTeacher = teacherPeriodMap.get(label) ?? new Map<number, number>();
+        const byTeacher =
+          teacherPeriodMap.get(label) ?? new Map<number, number>();
         const teacherEntries = Object.fromEntries(
-          uniqueTeachers.map((t) => [`t_${t.id}_kwh`, byTeacher.get(t.id) ?? null])
+          uniqueTeachers.map((t) => [
+            `t_${t.id}_kwh`,
+            byTeacher.get(t.id) ?? null,
+          ]),
         );
         return {
           period: label,
@@ -133,7 +139,7 @@ export const EnergyChart = memo(function EnergyChart({
           ...teacherEntries,
         };
       }),
-    [data, formatPeriodLabel, teacherPeriodMap, uniqueTeachers]
+    [data, formatPeriodLabel, teacherPeriodMap, uniqueTeachers],
   );
 
   // Helper: render a grouped Bar per visible teacher

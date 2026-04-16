@@ -24,27 +24,44 @@ import {
 import type { Classroom, TeacherEnergyBreakdown } from "../types";
 
 const TEACHER_COLORS = [
-  "#8b5cf6", "#ec4899", "#06b6d4", "#f97316",
-  "#14b8a6", "#a855f7", "#ef4444", "#84cc16",
-  "#3b82f6", "#f59e0b", "#10b981", "#e11d48",
-  "#0ea5e9", "#d946ef", "#22c55e", "#fb923c",
-  "#6366f1", "#f43f5e", "#2dd4bf", "#facc15",
+  "#8b5cf6",
+  "#ec4899",
+  "#06b6d4",
+  "#f97316",
+  "#14b8a6",
+  "#a855f7",
+  "#ef4444",
+  "#84cc16",
+  "#3b82f6",
+  "#f59e0b",
+  "#10b981",
+  "#e11d48",
+  "#0ea5e9",
+  "#d946ef",
+  "#22c55e",
+  "#fb923c",
+  "#6366f1",
+  "#f43f5e",
+  "#2dd4bf",
+  "#facc15",
 ];
 
 export function EnergyReportsPage() {
   const [classrooms, setClassrooms] = useState<Classroom[]>([]);
   const [chartType, setChartType] = useState<"area" | "bar" | "composed">(
-    "composed"
+    "composed",
   );
 
   // Filter state
   const [selectedClassroom, setSelectedClassroom] = useState<string>("");
-  const [selectedRange, setSelectedRange] = useState<"hour" | "day" | "week" | "month">(
-    "day"
-  );
+  const [selectedRange, setSelectedRange] = useState<
+    "hour" | "day" | "week" | "month"
+  >("day");
 
   // Teacher breakdown state
-  const [teacherBreakdown, setTeacherBreakdown] = useState<TeacherEnergyBreakdown[]>([]);
+  const [teacherBreakdown, setTeacherBreakdown] = useState<
+    TeacherEnergyBreakdown[]
+  >([]);
   const [hiddenTeachers, setHiddenTeachers] = useState<Set<number>>(new Set());
 
   // Create memoized filter object to prevent unnecessary re-renders
@@ -53,12 +70,20 @@ export function EnergyReportsPage() {
       classroom: selectedClassroom ? parseInt(selectedClassroom) : undefined,
       range: selectedRange,
     }),
-    [selectedClassroom, selectedRange]
+    [selectedClassroom, selectedRange],
   );
 
   // Use the real-time energy hook
-  const { reports, stats, isLoading, isRefreshing, error, isConnected, lastUpdate, refresh } =
-    useEnergy(filters);
+  const {
+    reports,
+    stats,
+    isLoading,
+    isRefreshing,
+    error,
+    isConnected,
+    lastUpdate,
+    refresh,
+  } = useEnergy(filters);
 
   useEffect(() => {
     loadClassrooms();
@@ -78,13 +103,16 @@ export function EnergyReportsPage() {
 
   const uniqueTeachers = useMemo(() => {
     const seen = new Set<number>();
-    return teacherBreakdown.reduce<{ id: number; name: string }[]>((acc, row) => {
-      if (!seen.has(row.teacher_id)) {
-        seen.add(row.teacher_id);
-        acc.push({ id: row.teacher_id, name: row.teacher_name });
-      }
-      return acc;
-    }, []);
+    return teacherBreakdown.reduce<{ id: number; name: string }[]>(
+      (acc, row) => {
+        if (!seen.has(row.teacher_id)) {
+          seen.add(row.teacher_id);
+          acc.push({ id: row.teacher_id, name: row.teacher_name });
+        }
+        return acc;
+      },
+      [],
+    );
   }, [teacherBreakdown]);
 
   const toggleTeacher = (id: number) =>
@@ -136,8 +164,8 @@ export function EnergyReportsPage() {
     const data = await refresh();
     if (!data.length) return;
     const classroomLabel = selectedClassroom
-      ? classrooms.find((c) => String(c.id) === selectedClassroom)?.name ??
-        `classroom-${selectedClassroom}`
+      ? (classrooms.find((c) => String(c.id) === selectedClassroom)?.name ??
+        `classroom-${selectedClassroom}`)
       : "All classrooms";
     exportEnergyReportsToCsv(data, {
       range: selectedRange,
@@ -200,7 +228,9 @@ export function EnergyReportsPage() {
                 id="range"
                 value={selectedRange}
                 onChange={(e) =>
-                  setSelectedRange(e.target.value as "hour" | "day" | "week" | "month")
+                  setSelectedRange(
+                    e.target.value as "hour" | "day" | "week" | "month",
+                  )
                 }
               >
                 <option value="hour">Hourly (Last 24 Hours)</option>
@@ -298,7 +328,10 @@ export function EnergyReportsPage() {
                     className={`flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs border transition-opacity ${
                       hidden ? "opacity-35" : "opacity-100"
                     }`}
-                    style={{ borderColor: color, color: hidden ? undefined : color }}
+                    style={{
+                      borderColor: color,
+                      color: hidden ? undefined : color,
+                    }}
                   >
                     <span
                       className="w-2 h-2 rounded-full shrink-0"
@@ -312,15 +345,17 @@ export function EnergyReportsPage() {
           )}
 
           {/* Info banner when main data is present but teacher breakdown is empty */}
-          {!isLoading && reports.length > 0 && teacherBreakdown.length === 0 && (
-            <p className="text-xs text-amber-600 bg-amber-50 dark:bg-amber-900/20 dark:text-amber-400 rounded px-3 py-2 mt-2">
-              Teacher breakdown is unavailable. Go to the{" "}
-              <a href="/teacher-energy" className="underline font-medium">
-                Teacher Energy page
-              </a>{" "}
-              and click <strong>Recalculate</strong> to populate it.
-            </p>
-          )}
+          {!isLoading &&
+            reports.length > 0 &&
+            teacherBreakdown.length === 0 && (
+              <p className="text-xs text-amber-600 bg-amber-50 dark:bg-amber-900/20 dark:text-amber-400 rounded px-3 py-2 mt-2">
+                Teacher breakdown is unavailable. Go to the{" "}
+                <a href="/teacher-energy" className="underline font-medium">
+                  Teacher Energy page
+                </a>{" "}
+                and click <strong>Recalculate</strong> to populate it.
+              </p>
+            )}
         </CardHeader>
         <CardContent>
           <EnergyChart
