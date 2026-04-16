@@ -461,6 +461,46 @@ class ApiService {
       method: 'POST',
     });
   }
+
+  // Data export
+  async exportAllData(params?: { start_date?: string; end_date?: string }): Promise<void> {
+    const searchParams = new URLSearchParams();
+    if (params?.start_date) searchParams.append('start_date', params.start_date);
+    if (params?.end_date)   searchParams.append('end_date',   params.end_date);
+
+    const query = searchParams.toString();
+    const response = await fetch(
+      `${API_BASE_URL}/export/${query ? `?${query}` : ''}`,
+      { headers: { Authorization: `Bearer ${this.accessToken}` } },
+    );
+
+    if (response.status === 401 && this.refreshToken) {
+      const refreshed = await this.refreshAccessToken();
+      if (refreshed) {
+        const retry = await fetch(
+          `${API_BASE_URL}/export/${query ? `?${query}` : ''}`,
+          { headers: { Authorization: `Bearer ${this.accessToken}` } },
+        );
+        if (!retry.ok) throw new Error('Export failed');
+        await this._downloadBlob(retry);
+        return;
+      }
+    }
+
+    if (!response.ok) throw new Error('Export failed');
+    await this._downloadBlob(response);
+  }
+
+  private async _downloadBlob(response: Response): Promise<void> {
+    const blob = await response.blob();
+    const url  = URL.createObjectURL(blob);
+    const a    = document.createElement('a');
+    const stamp = new Date().toISOString().slice(0, 19).replace(/[:T]/g, '-');
+    a.href     = url;
+    a.download = `export_${stamp}.zip`;
+    a.click();
+    URL.revokeObjectURL(url);
+  }
 }
 
 export const apiService = new ApiService();

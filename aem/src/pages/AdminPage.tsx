@@ -2051,6 +2051,113 @@ function SystemSettingsTab() {
   );
 }
 
+// ============== EXPORT DATA TAB ==============
+function ExportDataTab() {
+  const [startDate, setStartDate] = useState("");
+  const [endDate, setEndDate] = useState("");
+  const [isExporting, setIsExporting] = useState(false);
+  const [alert, setAlert] = useState<{ type: "success" | "error"; message: string } | null>(null);
+
+  const handleExport = async () => {
+    try {
+      setIsExporting(true);
+      setAlert(null);
+      await apiService.exportAllData({
+        start_date: startDate || undefined,
+        end_date: endDate || undefined,
+      });
+      setAlert({ type: "success", message: "Export downloaded successfully." });
+    } catch (err: unknown) {
+      setAlert({
+        type: "error",
+        message: err instanceof Error ? err.message : "Export failed. Please try again.",
+      });
+    } finally {
+      setIsExporting(false);
+    }
+  };
+
+  return (
+    <div className="space-y-4">
+      {alert && <Alert type={alert.type} message={alert.message} onClose={() => setAlert(null)} />}
+      <div>
+        <h2 className="text-lg font-semibold">Export Data</h2>
+        <p className="text-sm text-gray-500">
+          Download all system data as a ZIP archive containing CSV files for each data type.
+        </p>
+      </div>
+      <Card>
+        <CardHeader>
+          <CardTitle>Date Range (optional)</CardTitle>
+          <p className="text-sm text-gray-500">
+            Leave blank to export all data. Applies to attendance sessions, energy logs, energy
+            aggregations, and teacher energy usage. Schedules, classrooms, and users are always
+            exported in full.
+          </p>
+        </CardHeader>
+        <CardContent>
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-6">
+            <div>
+              <Label htmlFor="export-start">Start Date</Label>
+              <Input
+                id="export-start"
+                type="date"
+                value={startDate}
+                onChange={(e) => setStartDate(e.target.value)}
+              />
+            </div>
+            <div>
+              <Label htmlFor="export-end">End Date</Label>
+              <Input
+                id="export-end"
+                type="date"
+                value={endDate}
+                onChange={(e) => setEndDate(e.target.value)}
+              />
+            </div>
+          </div>
+          <Button onClick={handleExport} disabled={isExporting}>
+            {isExporting ? "Preparing download…" : "Download ZIP"}
+          </Button>
+        </CardContent>
+      </Card>
+      <Card>
+        <CardHeader>
+          <CardTitle>Included Files</CardTitle>
+        </CardHeader>
+        <CardContent>
+          <Table>
+            <TableHeader>
+              <TableRow>
+                <TableHead>File</TableHead>
+                <TableHead>Contents</TableHead>
+                <TableHead>Date filtered?</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {[
+                { file: "attendance_sessions.csv", contents: "All teacher attendance sessions with status and RFID info", filtered: "Yes" },
+                { file: "energy_logs.csv", contents: "Raw power readings (voltage, current, watts) from ESP32 devices", filtered: "Yes" },
+                { file: "energy_aggregations.csv", contents: "Pre-aggregated hourly/daily/monthly energy summaries", filtered: "Yes" },
+                { file: "teacher_energy_usage.csv", contents: "Energy consumption attributed per teacher per session", filtered: "Yes" },
+                { file: "schedules.csv", contents: "All classroom schedules", filtered: "No" },
+                { file: "classrooms.csv", contents: "Classroom list (device tokens excluded)", filtered: "No" },
+                { file: "users.csv", contents: "Teachers and admins (passwords excluded)", filtered: "No" },
+              ].map(({ file, contents, filtered }) => (
+                <TableRow key={file}>
+                  <TableCell className="font-mono text-sm">{file}</TableCell>
+                  <TableCell>{contents}</TableCell>
+                  <TableCell>{filtered}</TableCell>
+                </TableRow>
+              ))}
+            </TableBody>
+          </Table>
+        </CardContent>
+      </Card>
+    </div>
+  );
+}
+
 // ============== MAIN ADMIN PAGE ==============
 export function AdminPage() {
   const [activeTab, setActiveTab] = useState("Teachers");
@@ -2065,7 +2172,7 @@ export function AdminPage() {
       </div>
 
       <Tabs
-        tabs={["Teachers", "Classrooms", "Schedules", "Override Cards", "Maintenance Cards", "Sensor Calibration", "System Settings"]}
+        tabs={["Teachers", "Classrooms", "Schedules", "Override Cards", "Maintenance Cards", "Sensor Calibration", "System Settings", "Export Data"]}
         activeTab={activeTab}
         onTabChange={setActiveTab}
       />
@@ -2077,6 +2184,7 @@ export function AdminPage() {
       {activeTab === "Maintenance Cards" && <MaintenanceCardsTab />}
       {activeTab === "Sensor Calibration" && <SensorCalibrationTab />}
       {activeTab === "System Settings" && <SystemSettingsTab />}
+      {activeTab === "Export Data" && <ExportDataTab />}
     </div>
   );
 }

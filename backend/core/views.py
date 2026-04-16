@@ -1,9 +1,14 @@
+import csv
+import io
+import zipfile
+
 from rest_framework import viewsets, status, permissions
 from rest_framework.decorators import action
 from rest_framework.response import Response
 from rest_framework.views import APIView
 from rest_framework_simplejwt.tokens import RefreshToken
 from django.contrib.auth import authenticate, get_user_model
+from django.http import HttpResponse
 from django.utils import timezone
 from django.db.models import Sum, Avg, Max, Min, Count
 from django.db.models.functions import TruncDate, TruncHour, TruncDay, TruncWeek, TruncMonth
@@ -691,3 +696,189 @@ class TeacherEnergyViewSet(viewsets.ReadOnlyModelViewSet):
                 'error': f'Recalculation failed: {str(e)}',
                 'hint': 'Try again with smaller batch_size or larger delay'
             }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+class ExportDataView(APIView):
+    """Export all system data as CSV files bundled in a ZIP archive. Admin only."""
+    permission_classes = [permissions.IsAuthenticated, IsAdminUser]
+
+    def get(self, request):
+        start_date = request.query_params.get('start_date')  # optional ISO date e.g. 2026-01-01
+        end_date = request.query_params.get('end_date')      # optional ISO date e.g. 2026-12-31
+
+        zip_buffer = io.BytesIO()
+        with zipfile.ZipFile(zip_buffer, 'w', zipfile.ZIP_DEFLATED) as zf:
+            zf.writestr('attendance_sessions.csv', self._attendance_csv(start_date, end_date))
+            zf.writestr('energy_logs.csv',          self._energy_logs_csv(start_date, end_date))
+            zf.writestr('energy_aggregations.csv',  self._energy_agg_csv(start_date, end_date))
+            zf.writestr('teacher_energy_usage.csv', self._teacher_energy_csv(start_date, end_date))
+            zf.writestr('schedules.csv',             self._schedules_csv())
+            zf.writestr('classrooms.csv',            self._classrooms_csv())
+            zf.writestr('users.csv',                 self._users_csv())
+
+        zip_buffer.seek(0)
+        stamp = timezone.now().strftime('%Y%m%d_%H%M%S')
+        response = HttpResponse(zip_buffer.read(), content_type='application/zip')
+        response['Content-Disposition'] = f'attachment; filename="export_{stamp}.zip"'
+        return response
+
+    # ------------------------------------------------------------------ helpers
+
+    @staticmethod
+    def _make_csv(headers, rows):
+        buf = io.StringIO()
+        writer = csv.writer(buf)
+        writer.writerow(headers)
+        writer.writerows(rows)
+        # UTF-8 BOM so Excel opens correctly
+        return '\ufeff' + buf.getvalue()
+
+    def _attendance_csv(self, start_date, end_date):
+        qs = AttendanceSession.objects.select_related('teacher', 'classroom').order_by('-date', '-time_in')
+        if start_date:
+            qs = qs.filter(date__gte=start_date)
+        if end_date:
+            qs = qs.filter(date__lte=end_date)
+        headers = ['id', 'teacher_name', 'classroom_name', 'date', 'time_in', 'time_out',
+                   'expected_out', 'status', 'rfid_uid_used', 'is_override']
+        rows = [
+            [
+                s.id,
+                s.teacher.get_full_name() or s.teacher.username,
+                s.classroom.name,
+                s.date,
+                s.time_in.isoformat() if s.time_in else '',
+                s.time_out.isoformat() if s.time_out else '',
+                s.expected_out.isoformat() if s.expected_out else '',
+                s.status,
+                s.rfid_uid_used,
+                s.is_override,
+            ]
+            for s in qs.iterator()
+        ]
+        return self._make_csv(headers, rows)
+
+    def _energy_logs_csv(self, start_date, end_date):
+        qs = EnergyLog.objects.select_related('classroom').order_by('-timestamp')
+        if start_date:
+            qs = qs.filter(timestamp__date__gte=start_date)
+        if end_date:
+            qs = qs.filter(timestamp__date__lte=end_date)
+        headers = ['id', 'classroom_name', 'voltage', 'current', 'watts', 'timestamp']
+        rows = [
+            [
+                e.id,
+                e.classroom.name,
+                float(e.voltage) if e.voltage is not None else '',
+                float(e.current) if e.current is not None else '',
+                float(e.watts),
+                e.timestamp.isoformat(),
+            ]
+            for e in qs.iterator()
+        ]
+        return self._make_csv(headers, rows)
+
+    def _energy_agg_csv(self, start_date, end_date):
+        qs = EnergyAggregation.objects.select_related('classroom').order_by('-period_start')
+        if start_date:
+            qs = qs.filter(period_start__date__gte=start_date)
+        if end_date:
+            qs = qs.filter(period_start__date__lte=end_date)
+        headers = ['id', 'classroom_name', 'period_type', 'period_start',
+                   'total_kwh', 'avg_watts', 'max_watts', 'min_watts', 'reading_count']
+        rows = [
+            [
+                a.id,
+                a.classroom.name,
+                a.period_type,
+                a.period_start.isoformat(),
+                float(a.total_kwh),
+                float(a.avg_watts),
+                float(a.max_watts),
+                float(a.min_watts),
+                a.reading_count,
+            ]
+            for a in qs.iterator()
+        ]
+        return self._make_csv(headers, rows)
+
+    def _teacher_energy_csv(self, start_date, end_date):
+        qs = TeacherEnergyUsage.objects.select_related('teacher', 'classroom').order_by('-start_time')
+        if start_date:
+            qs = qs.filter(start_time__date__gte=start_date)
+        if end_date:
+            qs = qs.filter(end_time__date__lte=end_date)
+        headers = ['id', 'teacher_name', 'classroom_name', 'attendance_session_id',
+                   'start_time', 'end_time', 'duration_minutes',
+                   'avg_watts', 'max_watts', 'min_watts', 'total_kwh', 'reading_count']
+        rows = [
+            [
+                t.id,
+                t.teacher.get_full_name() or t.teacher.username,
+                t.classroom.name,
+                t.attendance_session_id,
+                t.start_time.isoformat(),
+                t.end_time.isoformat(),
+                t.duration_minutes,
+                float(t.avg_watts),
+                float(t.max_watts),
+                float(t.min_watts),
+                float(t.total_kwh),
+                t.reading_count,
+            ]
+            for t in qs.iterator()
+        ]
+        return self._make_csv(headers, rows)
+
+    def _schedules_csv(self):
+        qs = Schedule.objects.select_related('teacher', 'classroom').order_by('day_of_week', 'start_time')
+        headers = ['id', 'teacher_name', 'classroom_name', 'day_of_week', 'day_name',
+                   'start_time', 'end_time', 'subject']
+        rows = [
+            [
+                s.id,
+                s.teacher.get_full_name() or s.teacher.username,
+                s.classroom.name,
+                s.day_of_week,
+                s.get_day_of_week_display(),
+                s.start_time,
+                s.end_time,
+                s.subject,
+            ]
+            for s in qs.iterator()
+        ]
+        return self._make_csv(headers, rows)
+
+    def _classrooms_csv(self):
+        qs = Classroom.objects.order_by('name')
+        headers = ['id', 'name', 'device_id', 'is_active', 'created_at', 'updated_at']
+        rows = [
+            [
+                c.id,
+                c.name,
+                c.device_id,
+                c.is_active,
+                c.created_at.isoformat(),
+                c.updated_at.isoformat(),
+            ]
+            for c in qs.iterator()
+        ]
+        return self._make_csv(headers, rows)
+
+    def _users_csv(self):
+        qs = User.objects.order_by('role', 'last_name', 'first_name')
+        headers = ['id', 'username', 'email', 'first_name', 'last_name', 'role', 'rfid_uid', 'is_active']
+        rows = [
+            [
+                u.id,
+                u.username,
+                u.email,
+                u.first_name,
+                u.last_name,
+                u.role,
+                u.rfid_uid or '',
+                u.is_active,
+            ]
+            for u in qs.iterator()
+        ]
+        return self._make_csv(headers, rows)

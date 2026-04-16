@@ -5,7 +5,8 @@ from .views import (
     UserViewSet, ClassroomViewSet,
     ScheduleViewSet, AttendanceSessionViewSet, EnergyLogViewSet,
     EnergyReportView, DashboardView, TeacherEnergyViewSet,
-    OverrideRFIDViewSet, MaintenanceRFIDViewSet, SystemConfigView
+    OverrideRFIDViewSet, MaintenanceRFIDViewSet, SystemConfigView,
+    ExportDataView,
 )
 
 router = DefaultRouter()
@@ -27,4 +28,5 @@ urlpatterns = [
     path('energy/report/', EnergyReportView.as_view(), name='energy-report'),
     path('dashboard/', DashboardView.as_view(), name='dashboard'),
     path('system-config/', SystemConfigView.as_view(), name='system-config'),
+    path('export/', ExportDataView.as_view(), name='export-data'),
 ]
