@@ -155,13 +155,28 @@ class AttendanceSessionSerializer(serializers.ModelSerializer):
     teacher_name = serializers.CharField(source='teacher.get_full_name', read_only=True)
     classroom_name = serializers.CharField(source='classroom.name', read_only=True)
     status_display = serializers.CharField(source='get_status_display', read_only=True)
+    duration_minutes = serializers.SerializerMethodField()
+    total_kwh = serializers.SerializerMethodField()
     
     class Meta:
         model = AttendanceSession
         fields = ['id', 'teacher', 'teacher_name', 'classroom', 'classroom_name', 
                   'schedule', 'date', 'time_in', 'time_out', 'expected_out', 
-                  'status', 'status_display', 'rfid_uid_used', 'created_at']
+                  'status', 'status_display', 'rfid_uid_used', 'created_at',
+                  'duration_minutes', 'total_kwh']
         read_only_fields = ['id', 'created_at']
+
+    def get_duration_minutes(self, obj):
+        try:
+            return obj.energy_usage.duration_minutes
+        except AttributeError:
+            return None
+
+    def get_total_kwh(self, obj):
+        try:
+            return float(obj.energy_usage.total_kwh)
+        except AttributeError:
+            return None
 
 
 class EnergyLogSerializer(serializers.ModelSerializer):

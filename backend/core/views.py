@@ -261,16 +261,24 @@ class ScheduleViewSet(viewsets.ModelViewSet):
 
 class AttendanceSessionViewSet(viewsets.ModelViewSet):
     """ViewSet for managing attendance sessions."""
-    queryset = AttendanceSession.objects.select_related('teacher', 'classroom', 'schedule').all()
+    queryset = AttendanceSession.objects.select_related('teacher', 'classroom', 'schedule', 'energy_usage').all()
     serializer_class = AttendanceSessionSerializer
     permission_classes = [permissions.IsAuthenticated]
     
     def get_queryset(self):
-        queryset = AttendanceSession.objects.select_related('teacher', 'classroom', 'schedule').all()
+        queryset = AttendanceSession.objects.select_related('teacher', 'classroom', 'schedule', 'energy_usage').all()
         
         date_param = self.request.query_params.get('date')
         if date_param:
             queryset = queryset.filter(date=date_param)
+
+        start_date = self.request.query_params.get('start_date')
+        if start_date:
+            queryset = queryset.filter(date__gte=start_date)
+
+        end_date = self.request.query_params.get('end_date')
+        if end_date:
+            queryset = queryset.filter(date__lte=end_date)
         
         classroom_id = self.request.query_params.get('classroom')
         if classroom_id:
@@ -285,6 +293,11 @@ class AttendanceSessionViewSet(viewsets.ModelViewSet):
             queryset = queryset.filter(status=status_param)
         
         return queryset
+
+    def paginate_queryset(self, queryset):
+        if self.request.query_params.get('no_page'):
+            return None
+        return super().paginate_queryset(queryset)
     
     @action(detail=False, methods=['get'])
     def today(self, request):
