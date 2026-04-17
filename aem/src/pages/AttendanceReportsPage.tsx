@@ -92,6 +92,14 @@ export function AttendanceReportsPage() {
     });
   };
 
+  const formatDuration = (minutes: number | null) => {
+    if (minutes == null) return "-";
+    const h = Math.floor(minutes / 60);
+    const m = minutes % 60;
+    if (h === 0) return `${m} min`;
+    return m === 0 ? `${h} h` : `${h} h ${m} min`;
+  };
+
   const getExcessMinutes = (session: {
     status: string;
     expected_out: string | null;
@@ -266,6 +274,8 @@ export function AttendanceReportsPage() {
                   <TableHead>Time Out</TableHead>
                   <TableHead>Status</TableHead>
                   <TableHead>Excess</TableHead>
+                  <TableHead>Duration</TableHead>
+                  <TableHead>kWh</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
@@ -289,6 +299,12 @@ export function AttendanceReportsPage() {
                         ) : (
                           "-"
                         )}
+                      </TableCell>
+                      <TableCell>{formatDuration(session.duration_minutes)}</TableCell>
+                      <TableCell>
+                        {session.total_kwh != null
+                          ? session.total_kwh.toFixed(4)
+                          : "-"}
                       </TableCell>
                     </TableRow>
                   );

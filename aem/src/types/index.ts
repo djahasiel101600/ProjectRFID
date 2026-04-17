@@ -52,6 +52,8 @@ export interface AttendanceSession {
   status_display: string;
   rfid_uid_used: string;
   created_at: string;
+  duration_minutes: number | null;
+  total_kwh: number | null;
 }
 
 export interface EnergyLog {

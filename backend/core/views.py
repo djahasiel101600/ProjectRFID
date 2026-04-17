@@ -256,12 +256,12 @@ class ScheduleViewSet(viewsets.ModelViewSet):
 
 class AttendanceSessionViewSet(viewsets.ModelViewSet):
     """ViewSet for managing attendance sessions."""
-    queryset = AttendanceSession.objects.select_related('teacher', 'classroom', 'schedule').all()
+    queryset = AttendanceSession.objects.select_related('teacher', 'classroom', 'schedule', 'energy_usage').all()
     serializer_class = AttendanceSessionSerializer
     permission_classes = [permissions.IsAuthenticated]
     
     def get_queryset(self):
-        queryset = AttendanceSession.objects.select_related('teacher', 'classroom', 'schedule').all()
+        queryset = AttendanceSession.objects.select_related('teacher', 'classroom', 'schedule', 'energy_usage').all()
         
         date_param = self.request.query_params.get('date')
         if date_param:
