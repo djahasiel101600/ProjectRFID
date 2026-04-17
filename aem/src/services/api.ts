@@ -8,7 +8,8 @@ import type {
   OverrideRFID,
   MaintenanceRFID,
   SystemConfig,
-  ClassroomCalibration
+  ClassroomCalibration,
+  WeeklyScheduleEntry
 } from '../types';
 
 const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000/api';
@@ -306,6 +307,10 @@ class ApiService {
 
   async getTodaySchedules(): Promise<Schedule[]> {
     return this.request<Schedule[]>('/schedules/today/');
+  }
+
+  async getWeeklySchedule(weekStart: string): Promise<WeeklyScheduleEntry[]> {
+    return this.request<WeeklyScheduleEntry[]>(`/schedules/weekly/?week_start=${weekStart}`);
   }
 
   async createSchedule(schedule: Partial<Schedule>): Promise<Schedule> {

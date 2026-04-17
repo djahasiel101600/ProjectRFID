@@ -9,6 +9,7 @@ import {
   EnergyReportsPage,
   AdminPage,
   TeacherEnergyPage,
+  ScheduleWeekPage,
 } from "./pages";
 import "./App.css";
 
@@ -40,6 +41,8 @@ function AppContent() {
         return <TeacherEnergyPage />;
       case "admin":
         return <AdminPage />;
+      case "schedule":
+        return <ScheduleWeekPage />;
       default:
         return <DashboardPage />;
     }

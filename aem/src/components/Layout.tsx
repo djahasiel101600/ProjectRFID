@@ -16,6 +16,7 @@ export function Layout({ children, currentPage, onNavigate }: LayoutProps) {
     { name: "Attendance", page: "attendance" },
     { name: "Energy", page: "energy" },
     { name: "Teacher Energy", page: "teacher-energy" },
+    { name: "Schedule", page: "schedule" },
   ];
 
   if (user?.role === "admin") {
