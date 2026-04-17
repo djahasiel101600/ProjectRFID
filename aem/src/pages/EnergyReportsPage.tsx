@@ -48,9 +48,9 @@ const TEACHER_COLORS = [
 
 export function EnergyReportsPage() {
   const [classrooms, setClassrooms] = useState<Classroom[]>([]);
-  const [chartType, setChartType] = useState<"area" | "bar" | "composed">(
-    "composed",
-  );
+  const [chartType, setChartType] = useState<
+    "area" | "bar" | "composed" | "stacked"
+  >("composed");
 
   // Filter state
   const [selectedClassroom, setSelectedClassroom] = useState<string>("");
@@ -114,6 +114,63 @@ export function EnergyReportsPage() {
       [],
     );
   }, [teacherBreakdown]);
+
+  const teacherInsights = useMemo(() => {
+    if (!teacherBreakdown.length) return [];
+
+    const map = new Map<
+      number,
+      {
+        id: number;
+        name: string;
+        colorIndex: number;
+        totalKwh: number;
+        sessionCount: number;
+        avgWattsSum: number;
+        periodCount: number;
+      }
+    >();
+
+    teacherBreakdown.forEach((row) => {
+      const existing = map.get(row.teacher_id);
+      if (existing) {
+        existing.totalKwh += row.total_kwh;
+        existing.sessionCount += row.session_count;
+        existing.avgWattsSum += row.avg_watts;
+        existing.periodCount += 1;
+      } else {
+        const colorIndex = uniqueTeachers.findIndex(
+          (t) => t.id === row.teacher_id,
+        );
+        map.set(row.teacher_id, {
+          id: row.teacher_id,
+          name: row.teacher_name,
+          colorIndex: colorIndex >= 0 ? colorIndex : 0,
+          totalKwh: row.total_kwh,
+          sessionCount: row.session_count,
+          avgWattsSum: row.avg_watts,
+          periodCount: 1,
+        });
+      }
+    });
+
+    const grandTotal = Array.from(map.values()).reduce(
+      (s, r) => s + r.totalKwh,
+      0,
+    );
+
+    return Array.from(map.values())
+      .map((r) => ({
+        id: r.id,
+        name: r.name,
+        colorIndex: r.colorIndex,
+        totalKwh: r.totalKwh,
+        sessionCount: r.sessionCount,
+        avgWatts: r.periodCount > 0 ? r.avgWattsSum / r.periodCount : 0,
+        pct: grandTotal > 0 ? (r.totalKwh / grandTotal) * 100 : 0,
+      }))
+      .sort((a, b) => b.totalKwh - a.totalKwh);
+  }, [teacherBreakdown, uniqueTeachers]);
 
   const toggleTeacher = (id: number) =>
     setHiddenTeachers((prev) => {
@@ -312,6 +369,13 @@ export function EnergyReportsPage() {
               >
                 Area
               </Button>
+              <Button
+                variant={chartType === "stacked" ? "default" : "outline"}
+                size="sm"
+                onClick={() => setChartType("stacked")}
+              >
+                Stacked
+              </Button>
             </div>
           </div>
 
@@ -368,6 +432,145 @@ export function EnergyReportsPage() {
           />
         </CardContent>
       </Card>
+
+      {/* Teacher Consumption Breakdown */}
+      {teacherInsights.length > 0 && (
+        <Card>
+          <CardHeader>
+            <CardTitle>Teacher Consumption Breakdown</CardTitle>
+            <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">
+              Aggregated over the selected{" "}
+              {
+                {
+                  hour: "hourly",
+                  day: "daily",
+                  week: "weekly",
+                  month: "monthly",
+                }[selectedRange]
+              }{" "}
+              range
+            </p>
+          </CardHeader>
+          <CardContent className="space-y-6">
+            {/* Top / Least consumer mini-cards */}
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              {(() => {
+                const top = teacherInsights[0];
+                const topColor =
+                  TEACHER_COLORS[top.colorIndex % TEACHER_COLORS.length];
+                const least = teacherInsights[teacherInsights.length - 1];
+                const leastColor =
+                  TEACHER_COLORS[least.colorIndex % TEACHER_COLORS.length];
+                return (
+                  <>
+                    <div
+                      className="rounded-lg border p-4 flex flex-col gap-1"
+                      style={{ borderColor: topColor }}
+                    >
+                      <span
+                        className="text-xs font-semibold uppercase tracking-wide"
+                        style={{ color: topColor }}
+                      >
+                        Highest Usage
+                      </span>
+                      <span className="text-base font-bold text-gray-900 dark:text-white">
+                        {top.name}
+                      </span>
+                      <span
+                        className="text-2xl font-bold"
+                        style={{ color: topColor }}
+                      >
+                        {top.totalKwh.toFixed(4)} kWh
+                      </span>
+                      <span className="text-xs text-gray-500">
+                        {top.pct.toFixed(1)}% of total &bull; {top.sessionCount}{" "}
+                        session
+                        {top.sessionCount !== 1 ? "s" : ""}
+                      </span>
+                    </div>
+
+                    {teacherInsights.length > 1 && (
+                      <div
+                        className="rounded-lg border p-4 flex flex-col gap-1"
+                        style={{ borderColor: leastColor }}
+                      >
+                        <span
+                          className="text-xs font-semibold uppercase tracking-wide"
+                          style={{ color: leastColor }}
+                        >
+                          Lowest Usage
+                        </span>
+                        <span className="text-base font-bold text-gray-900 dark:text-white">
+                          {least.name}
+                        </span>
+                        <span
+                          className="text-2xl font-bold"
+                          style={{ color: leastColor }}
+                        >
+                          {least.totalKwh.toFixed(4)} kWh
+                        </span>
+                        <span className="text-xs text-gray-500">
+                          {least.pct.toFixed(1)}% of total &bull;{" "}
+                          {least.sessionCount} session
+                          {least.sessionCount !== 1 ? "s" : ""}
+                        </span>
+                      </div>
+                    )}
+                  </>
+                );
+              })()}
+            </div>
+
+            {/* Ranked progress-bar list */}
+            <div className="space-y-1">
+              {teacherInsights.map((t, i) => {
+                const color =
+                  TEACHER_COLORS[t.colorIndex % TEACHER_COLORS.length];
+                const hidden = hiddenTeachers.has(t.id);
+                return (
+                  <button
+                    key={t.id}
+                    onClick={() => toggleTeacher(t.id)}
+                    className={`w-full flex items-center gap-3 px-3 py-2 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-800 transition-opacity text-left ${
+                      hidden ? "opacity-40" : "opacity-100"
+                    }`}
+                  >
+                    <span className="w-5 text-xs text-gray-400 shrink-0 text-right">
+                      {i + 1}
+                    </span>
+                    <span
+                      className="w-2.5 h-2.5 rounded-full shrink-0"
+                      style={{ background: color }}
+                    />
+                    <span className="w-32 text-sm font-medium truncate text-gray-900 dark:text-white">
+                      {t.name}
+                    </span>
+                    <div className="flex-1 bg-gray-100 dark:bg-gray-700 rounded-full h-2">
+                      <div
+                        className="h-2 rounded-full transition-all"
+                        style={{ width: `${t.pct}%`, background: color }}
+                      />
+                    </div>
+                    <span className="text-xs text-gray-500 w-24 text-right shrink-0">
+                      {t.totalKwh.toFixed(4)} kWh
+                    </span>
+                    <span
+                      className="text-xs font-medium w-12 text-right shrink-0"
+                      style={{ color }}
+                    >
+                      {t.pct.toFixed(1)}%
+                    </span>
+                    <span className="text-xs text-gray-400 w-20 text-right shrink-0">
+                      {t.sessionCount} session
+                      {t.sessionCount !== 1 ? "s" : ""}
+                    </span>
+                  </button>
+                );
+              })}
+            </div>
+          </CardContent>
+        </Card>
+      )}
 
       {/* Data Table */}
       <Card>

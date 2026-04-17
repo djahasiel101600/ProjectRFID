@@ -45,7 +45,7 @@ const CustomTooltip = memo(function CustomTooltip({
 interface EnergyChartProps {
   data: EnergyReport[];
   range: "hour" | "day" | "week" | "month";
-  chartType?: "area" | "bar" | "composed";
+  chartType?: "area" | "bar" | "composed" | "stacked";
   teacherBreakdown?: TeacherEnergyBreakdown[];
   hiddenTeachers?: Set<number>;
   teacherColors?: string[];
@@ -142,6 +142,45 @@ export const EnergyChart = memo(function EnergyChart({
     [data, formatPeriodLabel, teacherPeriodMap, uniqueTeachers],
   );
 
+  // Stacked-mode dataset: built exclusively from teacherBreakdown (avoids timeline mismatch with EnergyLog periods)
+  const stackedChartData = useMemo(() => {
+    if (!teacherBreakdown?.length) return [];
+
+    const periodOrder: string[] = [];
+    const periodSet = new Set<string>();
+    const periodTeacherMap = new Map<string, Map<number, number>>();
+
+    for (const row of teacherBreakdown) {
+      const label = formatPeriodLabel(row.period);
+      if (!periodSet.has(label)) {
+        periodSet.add(label);
+        periodOrder.push(label);
+        periodTeacherMap.set(label, new Map());
+      }
+      const tm = periodTeacherMap.get(label)!;
+      tm.set(row.teacher_id, (tm.get(row.teacher_id) ?? 0) + row.total_kwh);
+    }
+
+    return periodOrder.map((label) => {
+      const tm = periodTeacherMap.get(label)!;
+      const teacherEntries = Object.fromEntries(
+        uniqueTeachers.map((t) => [`t_${t.id}_kwh`, tm.get(t.id) ?? null]),
+      );
+      return { period: label, ...teacherEntries };
+    });
+  }, [teacherBreakdown, formatPeriodLabel, uniqueTeachers]);
+
+  // Sizing helpers for stacked mode
+  const visibleTeachers = uniqueTeachers.filter(
+    (t) => !(hiddenTeachers ?? new Set()).has(t.id),
+  );
+  const stackedChartHeight = Math.max(
+    320,
+    Math.min(visibleTeachers.length * 28, 600),
+  );
+  const stackedBarSize =
+    stackedChartData.length > 20 ? 16 : stackedChartData.length > 10 ? 24 : 40;
+
   // Helper: render a grouped Bar per visible teacher
   const renderTeacherBars = (yAxisId?: string) =>
     uniqueTeachers
@@ -156,6 +195,70 @@ export const EnergyChart = memo(function EnergyChart({
           radius={[4, 4, 0, 0]}
         />
       ));
+
+  if (chartType === "stacked") {
+    if (!stackedChartData.length) {
+      return (
+        <div className="h-80 flex items-center justify-center bg-gray-50 dark:bg-gray-800 rounded-lg">
+          <p className="text-gray-500 text-center text-sm px-6">
+            No teacher breakdown data available. Go to the{" "}
+            <a
+              href="/teacher-energy"
+              className="underline font-medium text-amber-600"
+            >
+              Teacher Energy page
+            </a>{" "}
+            and click <strong>Recalculate</strong> to populate it.
+          </p>
+        </div>
+      );
+    }
+    return (
+      <ResponsiveContainer width="100%" height={stackedChartHeight}>
+        <BarChart
+          data={stackedChartData}
+          margin={{ top: 10, right: 30, left: 0, bottom: 0 }}
+          barSize={stackedBarSize}
+        >
+          <CartesianGrid
+            strokeDasharray="3 3"
+            className="stroke-gray-200 dark:stroke-gray-700"
+          />
+          <XAxis
+            dataKey="period"
+            tick={{ fontSize: 12 }}
+            className="text-gray-600 dark:text-gray-400"
+          />
+          <YAxis
+            tick={{ fontSize: 12 }}
+            className="text-gray-600 dark:text-gray-400"
+            label={{
+              value: "kWh",
+              angle: -90,
+              position: "insideLeft",
+              style: { textAnchor: "middle" },
+            }}
+          />
+          <Tooltip content={<CustomTooltip />} />
+          <Legend />
+          {visibleTeachers.map((t, i) => (
+            <Bar
+              key={t.id}
+              dataKey={`t_${t.id}_kwh`}
+              name={`${t.name} (kWh)`}
+              stackId="teachers"
+              fill={
+                teacherColors?.[i % (teacherColors?.length ?? 20)] ?? "#8b5cf6"
+              }
+              radius={
+                i === visibleTeachers.length - 1 ? [4, 4, 0, 0] : [0, 0, 0, 0]
+              }
+            />
+          ))}
+        </BarChart>
+      </ResponsiveContainer>
+    );
+  }
 
   if (data.length === 0) {
     return (
