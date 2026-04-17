@@ -253,6 +253,118 @@ class ScheduleViewSet(viewsets.ModelViewSet):
         schedules = self.get_queryset().filter(day_of_week=today)
         return Response(ScheduleSerializer(schedules, many=True).data)
 
+    @action(detail=False, methods=['get'])
+    def weekly(self, request):
+        """Return all schedules for a given week enriched with actual attendance & energy data.
+
+        Query param:
+            week_start (YYYY-MM-DD) — must be a Monday. Defaults to the current week's Monday.
+        """
+        from datetime import date, timedelta
+
+        week_start_param = request.query_params.get('week_start')
+        if week_start_param:
+            try:
+                week_start = date.fromisoformat(week_start_param)
+            except ValueError:
+                return Response(
+                    {'error': 'week_start must be a valid ISO date (YYYY-MM-DD).'},
+                    status=400
+                )
+            if week_start.weekday() != 0:
+                return Response({'error': 'week_start must be a Monday.'}, status=400)
+        else:
+            today = timezone.now().date()
+            week_start = today - timedelta(days=today.weekday())
+
+        # Map day_of_week (0-6) to actual date in the selected week
+        week_dates = {i: week_start + timedelta(days=i) for i in range(7)}
+        all_week_dates = list(week_dates.values())
+
+        # All schedules (all teachers, full week)
+        schedules = (
+            Schedule.objects
+            .select_related('teacher', 'classroom')
+            .order_by('day_of_week', 'start_time')
+        )
+
+        # Batch-fetch all matching attendance sessions for the week
+        sessions_qs = (
+            AttendanceSession.objects
+            .filter(date__in=all_week_dates)
+            .select_related('teacher', 'classroom')
+            .prefetch_related('energy_usage')
+        )
+
+        # Build lookup: (teacher_id, classroom_id, date) -> best session
+        # Prefer non-INVALID, then latest time_in
+        STATUS_PRIORITY = {'IN': 0, 'MANUAL_OUT': 1, 'AUTO_OUT': 2, 'CASCADE_OUT': 3, 'INVALID': 4}
+        session_map = {}
+        for s in sessions_qs:
+            key = (s.teacher_id, s.classroom_id, s.date)
+            existing = session_map.get(key)
+            if existing is None:
+                session_map[key] = s
+            else:
+                s_priority = STATUS_PRIORITY.get(s.status, 9)
+                e_priority = STATUS_PRIORITY.get(existing.status, 9)
+                if s_priority < e_priority or (
+                    s_priority == e_priority and s.time_in > existing.time_in
+                ):
+                    session_map[key] = s
+
+        now = timezone.now()
+        result = []
+        for sched in schedules:
+            actual_date = week_dates[sched.day_of_week]
+            session = session_map.get((sched.teacher_id, sched.classroom_id, actual_date))
+
+            session_data = None
+            if session is not None:
+                # Duration & kWh from TeacherEnergyUsage (populated after session ends)
+                duration_minutes = None
+                total_kwh = None
+                try:
+                    eu = session.energy_usage
+                    duration_minutes = eu.duration_minutes
+                    total_kwh = float(eu.total_kwh)
+                except Exception:
+                    pass
+
+                # Excess minutes beyond expected_out
+                excess_minutes = None
+                if session.expected_out:
+                    end_time = now if session.status == 'IN' else (session.time_out or now)
+                    diff = int((end_time - session.expected_out).total_seconds() / 60)
+                    excess_minutes = diff if diff > 0 else None
+
+                session_data = {
+                    'id': session.id,
+                    'status': session.status,
+                    'time_in': session.time_in.isoformat() if session.time_in else None,
+                    'time_out': session.time_out.isoformat() if session.time_out else None,
+                    'duration_minutes': duration_minutes,
+                    'excess_minutes': excess_minutes,
+                    'total_kwh': total_kwh,
+                }
+
+            result.append({
+                'schedule_id': sched.id,
+                'teacher_id': sched.teacher_id,
+                'teacher_name': sched.teacher.get_full_name() or sched.teacher.username,
+                'classroom_id': sched.classroom_id,
+                'classroom_name': sched.classroom.name,
+                'day_of_week': sched.day_of_week,
+                'day_name': sched.get_day_of_week_display(),
+                'date': actual_date.isoformat(),
+                'start_time': sched.start_time.strftime('%H:%M'),
+                'end_time': sched.end_time.strftime('%H:%M'),
+                'subject': sched.subject,
+                'session': session_data,
+            })
+
+        return Response(result)
+
 
 class AttendanceSessionViewSet(viewsets.ModelViewSet):
     """ViewSet for managing attendance sessions."""

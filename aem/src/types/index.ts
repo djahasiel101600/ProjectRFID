@@ -111,6 +111,31 @@ export interface ClassroomCalibration {
   updated_at: string;
 }
 
+export interface WeeklySessionData {
+  id: number;
+  status: string;
+  time_in: string | null;
+  time_out: string | null;
+  duration_minutes: number | null;
+  excess_minutes: number | null;
+  total_kwh: number | null;
+}
+
+export interface WeeklyScheduleEntry {
+  schedule_id: number;
+  teacher_id: number;
+  teacher_name: string;
+  classroom_id: number;
+  classroom_name: string;
+  day_of_week: number;
+  day_name: string;
+  date: string;
+  start_time: string;
+  end_time: string;
+  subject: string | null;
+  session: WeeklySessionData | null;
+}
+
 export interface Teacher {
   id: number,
   username: string,
