@@ -36,9 +36,7 @@ backend/env/
 # Migrations (optional)
 # =========================
 backend/**/migrations/*.py
-backend/**/migrations/__init__.py
-backend/*.sqlite3-shm
-backend/*.sqlite3-wal
+!backend/**/migrations/__init__.py
 
 # =========================
 # IDE / Editor
@@ -57,3 +55,6 @@ Thumbs.db
 # Node (if frontend exists)
 # =========================
 node_modules/
+backend/*.sqlite3
+backend/*.sqlite3-wal
+backend/*.sqlite3-shm
