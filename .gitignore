@@ -55,6 +55,6 @@ Thumbs.db
 # Node (if frontend exists)
 # =========================
 node_modules/
-*.sqlite3
-*.sqlite3-wal
-*.sqlite3-shm
+backend/*.sqlite3
+backend/*.sqlite3-wal
+backend/*.sqlite3-shm
