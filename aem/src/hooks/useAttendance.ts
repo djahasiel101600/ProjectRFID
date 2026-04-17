@@ -5,7 +5,10 @@ import wsService from '../services/websocket';
 
 interface AttendanceFilters {
   date?: string;
+  start_date?: string;
+  end_date?: string;
   classroom?: number;
+  teacher?: number;
   status?: string;
 }
 
@@ -30,10 +33,13 @@ export function useAttendance(filters: AttendanceFilters = {}) {
         setIsLoading(true);
       }
       setError(null);
-      const params: { date?: string; classroom?: number; status?: string } = {};
+      const params: { date?: string; start_date?: string; end_date?: string; classroom?: number; teacher?: number; status?: string } = {};
 
       if (filtersRef.current.date) params.date = filtersRef.current.date;
+      if (filtersRef.current.start_date) params.start_date = filtersRef.current.start_date;
+      if (filtersRef.current.end_date) params.end_date = filtersRef.current.end_date;
       if (filtersRef.current.classroom) params.classroom = filtersRef.current.classroom;
+      if (filtersRef.current.teacher) params.teacher = filtersRef.current.teacher;
       if (filtersRef.current.status) params.status = filtersRef.current.status;
 
       console.log('Fetching attendance with params:', params);
@@ -57,7 +63,7 @@ export function useAttendance(filters: AttendanceFilters = {}) {
     // Reset initial load flag when filters change
     hasInitialLoadRef.current = false;
     fetchData(true);
-  }, [filters.date, filters.classroom, filters.status, fetchData]);
+  }, [filters.date, filters.start_date, filters.end_date, filters.classroom, filters.teacher, filters.status, fetchData]);
 
   useEffect(() => {
     // Connect to WebSocket

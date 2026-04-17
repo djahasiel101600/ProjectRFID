@@ -326,9 +326,18 @@ class ApiService {
   }
 
   // Attendance
-  async getAttendance(params?: { date?: string; classroom?: number; teacher?: number; status?: string }): Promise<AttendanceSession[]> {
+  async getAttendance(params?: {
+    date?: string;
+    start_date?: string;
+    end_date?: string;
+    classroom?: number;
+    teacher?: number;
+    status?: string;
+  }): Promise<AttendanceSession[]> {
     const searchParams = new URLSearchParams();
     if (params?.date) searchParams.append('date', params.date);
+    if (params?.start_date) searchParams.append('start_date', params.start_date);
+    if (params?.end_date) searchParams.append('end_date', params.end_date);
     if (params?.classroom) searchParams.append('classroom', params.classroom.toString());
     if (params?.teacher) searchParams.append('teacher', params.teacher.toString());
     if (params?.status) searchParams.append('status', params.status);
@@ -337,6 +346,31 @@ class ApiService {
     const response = await this.request<{ results?: AttendanceSession[] } | AttendanceSession[]>(`/attendance/${query ? `?${query}` : ''}`);
     
     // Handle both paginated response (with results) and direct array response
+    if (Array.isArray(response)) {
+      return response;
+    }
+    return response.results || [];
+  }
+
+  async exportAttendance(params?: {
+    date?: string;
+    start_date?: string;
+    end_date?: string;
+    classroom?: number;
+    teacher?: number;
+    status?: string;
+  }): Promise<AttendanceSession[]> {
+    const searchParams = new URLSearchParams();
+    if (params?.date) searchParams.append('date', params.date);
+    if (params?.start_date) searchParams.append('start_date', params.start_date);
+    if (params?.end_date) searchParams.append('end_date', params.end_date);
+    if (params?.classroom) searchParams.append('classroom', params.classroom.toString());
+    if (params?.teacher) searchParams.append('teacher', params.teacher.toString());
+    if (params?.status) searchParams.append('status', params.status);
+    searchParams.append('no_page', '1');
+
+    const query = searchParams.toString();
+    const response = await this.request<{ results?: AttendanceSession[] } | AttendanceSession[]>(`/attendance/?${query}`);
     if (Array.isArray(response)) {
       return response;
     }
