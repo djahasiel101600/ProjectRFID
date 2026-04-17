@@ -4,7 +4,7 @@ from .views import (
     LoginView, LogoutView, SetupStatusView, RegisterView,
     UserViewSet, ClassroomViewSet,
     ScheduleViewSet, AttendanceSessionViewSet, EnergyLogViewSet,
-    EnergyReportView, DashboardView, TeacherEnergyViewSet,
+    EnergyReportView, TeacherEnergyBreakdownView, DashboardView, TeacherEnergyViewSet,
     OverrideRFIDViewSet, MaintenanceRFIDViewSet, SystemConfigView
 )
 
@@ -25,6 +25,7 @@ urlpatterns = [
     path('auth/setup-status/', SetupStatusView.as_view(), name='setup-status'),
     path('auth/register/', RegisterView.as_view(), name='register'),
     path('energy/report/', EnergyReportView.as_view(), name='energy-report'),
+    path('energy/teacher-breakdown/', TeacherEnergyBreakdownView.as_view(), name='energy-teacher-breakdown'),
     path('dashboard/', DashboardView.as_view(), name='dashboard'),
     path('system-config/', SystemConfigView.as_view(), name='system-config'),
 ]

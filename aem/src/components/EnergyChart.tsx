@@ -13,7 +13,7 @@ import {
   ComposedChart,
   Line,
 } from "recharts";
-import type { EnergyReport } from "../types";
+import type { EnergyReport, TeacherEnergyBreakdown } from "../types";
 import { parseLocalDateTime, formatIsoWeekRangeLabel } from "../lib/utils";
 
 // Memoized CustomTooltip component - defined outside to prevent recreation on each render
@@ -31,7 +31,9 @@ const CustomTooltip = memo(function CustomTooltip({
         {payload.map((entry: any, index: number) => (
           <p key={index} className="text-sm" style={{ color: entry.color }}>
             {entry.name}: {entry.value}{" "}
-            {entry.dataKey.includes("Kwh") ? "kWh" : "W"}
+            {entry.dataKey.includes("Kwh") || entry.dataKey.endsWith("_kwh")
+              ? "kWh"
+              : "W"}
           </p>
         ))}
       </div>
@@ -43,13 +45,19 @@ const CustomTooltip = memo(function CustomTooltip({
 interface EnergyChartProps {
   data: EnergyReport[];
   range: "hour" | "day" | "week" | "month";
-  chartType?: "area" | "bar" | "composed";
+  chartType?: "area" | "bar" | "composed" | "stacked";
+  teacherBreakdown?: TeacherEnergyBreakdown[];
+  hiddenTeachers?: Set<number>;
+  teacherColors?: string[];
 }
 
 export const EnergyChart = memo(function EnergyChart({
   data,
   range,
   chartType = "composed",
+  teacherBreakdown,
+  hiddenTeachers,
+  teacherColors,
 }: EnergyChartProps) {
   // Memoized format period label function based on range
   const formatPeriodLabel = useCallback(
@@ -78,23 +86,179 @@ export const EnergyChart = memo(function EnergyChart({
           return period;
       }
     },
-    [range]
+    [range],
   );
 
-  // Memoized chart data transformation - only recalculates when data or formatPeriodLabel changes
+  // Derive unique teachers from breakdown
+  const uniqueTeachers = useMemo(() => {
+    const seen = new Set<number>();
+    return (teacherBreakdown ?? []).reduce<{ id: number; name: string }[]>(
+      (acc, row) => {
+        if (!seen.has(row.teacher_id)) {
+          seen.add(row.teacher_id);
+          acc.push({ id: row.teacher_id, name: row.teacher_name });
+        }
+        return acc;
+      },
+      [],
+    );
+  }, [teacherBreakdown]);
+
+  // Map: formatted-period -> teacher_id -> total_kwh for O(1) lookup
+  const teacherPeriodMap = useMemo(() => {
+    const map = new Map<string, Map<number, number>>();
+    for (const row of teacherBreakdown ?? []) {
+      const label = formatPeriodLabel(row.period);
+      if (!map.has(label)) map.set(label, new Map());
+      map.get(label)!.set(row.teacher_id, row.total_kwh);
+    }
+    return map;
+  }, [teacherBreakdown, formatPeriodLabel]);
+
+  // Memoized chart data transformation - merges teacher kWh values into each period
   const chartData = useMemo(
     () =>
-      data.map((item) => ({
-        period: formatPeriodLabel(item.period),
-        fullPeriod: item.period,
-        totalKwh: Number(item.total_kwh.toFixed(4)),
-        avgWatts: Number(item.avg_watts.toFixed(1)),
-        maxWatts: Number(item.max_watts.toFixed(1)),
-        minWatts: Number(item.min_watts.toFixed(1)),
-        readings: item.reading_count,
-      })),
-    [data, formatPeriodLabel]
+      data.map((item) => {
+        const label = formatPeriodLabel(item.period);
+        const byTeacher =
+          teacherPeriodMap.get(label) ?? new Map<number, number>();
+        const teacherEntries = Object.fromEntries(
+          uniqueTeachers.map((t) => [
+            `t_${t.id}_kwh`,
+            byTeacher.get(t.id) ?? null,
+          ]),
+        );
+        return {
+          period: label,
+          fullPeriod: item.period,
+          totalKwh: Number(item.total_kwh.toFixed(4)),
+          avgWatts: Number(item.avg_watts.toFixed(1)),
+          maxWatts: Number(item.max_watts.toFixed(1)),
+          minWatts: Number(item.min_watts.toFixed(1)),
+          readings: item.reading_count,
+          ...teacherEntries,
+        };
+      }),
+    [data, formatPeriodLabel, teacherPeriodMap, uniqueTeachers],
   );
+
+  // Stacked-mode dataset: built exclusively from teacherBreakdown (avoids timeline mismatch with EnergyLog periods)
+  const stackedChartData = useMemo(() => {
+    if (!teacherBreakdown?.length) return [];
+
+    const periodOrder: string[] = [];
+    const periodSet = new Set<string>();
+    const periodTeacherMap = new Map<string, Map<number, number>>();
+
+    for (const row of teacherBreakdown) {
+      const label = formatPeriodLabel(row.period);
+      if (!periodSet.has(label)) {
+        periodSet.add(label);
+        periodOrder.push(label);
+        periodTeacherMap.set(label, new Map());
+      }
+      const tm = periodTeacherMap.get(label)!;
+      tm.set(row.teacher_id, (tm.get(row.teacher_id) ?? 0) + row.total_kwh);
+    }
+
+    return periodOrder.map((label) => {
+      const tm = periodTeacherMap.get(label)!;
+      const teacherEntries = Object.fromEntries(
+        uniqueTeachers.map((t) => [`t_${t.id}_kwh`, tm.get(t.id) ?? null]),
+      );
+      return { period: label, ...teacherEntries };
+    });
+  }, [teacherBreakdown, formatPeriodLabel, uniqueTeachers]);
+
+  // Sizing helpers for stacked mode
+  const visibleTeachers = uniqueTeachers.filter(
+    (t) => !(hiddenTeachers ?? new Set()).has(t.id),
+  );
+  const stackedChartHeight = Math.max(
+    320,
+    Math.min(visibleTeachers.length * 28, 600),
+  );
+  const stackedBarSize =
+    stackedChartData.length > 20 ? 16 : stackedChartData.length > 10 ? 24 : 40;
+
+  // Helper: render a grouped Bar per visible teacher
+  const renderTeacherBars = (yAxisId?: string) =>
+    uniqueTeachers
+      .filter((t) => !(hiddenTeachers ?? new Set()).has(t.id))
+      .map((t, i) => (
+        <Bar
+          key={t.id}
+          {...(yAxisId ? { yAxisId } : {})}
+          dataKey={`t_${t.id}_kwh`}
+          name={`${t.name} (kWh)`}
+          fill={teacherColors?.[i % (teacherColors?.length ?? 20)] ?? "#8b5cf6"}
+          radius={[4, 4, 0, 0]}
+        />
+      ));
+
+  if (chartType === "stacked") {
+    if (!stackedChartData.length) {
+      return (
+        <div className="h-80 flex items-center justify-center bg-gray-50 dark:bg-gray-800 rounded-lg">
+          <p className="text-gray-500 text-center text-sm px-6">
+            No teacher breakdown data available. Go to the{" "}
+            <a
+              href="/teacher-energy"
+              className="underline font-medium text-amber-600"
+            >
+              Teacher Energy page
+            </a>{" "}
+            and click <strong>Recalculate</strong> to populate it.
+          </p>
+        </div>
+      );
+    }
+    return (
+      <ResponsiveContainer width="100%" height={stackedChartHeight}>
+        <BarChart
+          data={stackedChartData}
+          margin={{ top: 10, right: 30, left: 0, bottom: 0 }}
+          barSize={stackedBarSize}
+        >
+          <CartesianGrid
+            strokeDasharray="3 3"
+            className="stroke-gray-200 dark:stroke-gray-700"
+          />
+          <XAxis
+            dataKey="period"
+            tick={{ fontSize: 12 }}
+            className="text-gray-600 dark:text-gray-400"
+          />
+          <YAxis
+            tick={{ fontSize: 12 }}
+            className="text-gray-600 dark:text-gray-400"
+            label={{
+              value: "kWh",
+              angle: -90,
+              position: "insideLeft",
+              style: { textAnchor: "middle" },
+            }}
+          />
+          <Tooltip content={<CustomTooltip />} />
+          <Legend />
+          {visibleTeachers.map((t, i) => (
+            <Bar
+              key={t.id}
+              dataKey={`t_${t.id}_kwh`}
+              name={`${t.name} (kWh)`}
+              stackId="teachers"
+              fill={
+                teacherColors?.[i % (teacherColors?.length ?? 20)] ?? "#8b5cf6"
+              }
+              radius={
+                i === visibleTeachers.length - 1 ? [4, 4, 0, 0] : [0, 0, 0, 0]
+              }
+            />
+          ))}
+        </BarChart>
+      </ResponsiveContainer>
+    );
+  }
 
   if (data.length === 0) {
     return (
@@ -154,6 +318,7 @@ export const EnergyChart = memo(function EnergyChart({
             fillOpacity={1}
             fill="url(#colorAvg)"
           />
+          {renderTeacherBars()}
         </AreaChart>
       </ResponsiveContainer>
     );
@@ -193,6 +358,7 @@ export const EnergyChart = memo(function EnergyChart({
             fill="#10b981"
             radius={[4, 4, 0, 0]}
           />
+          {renderTeacherBars()}
         </BarChart>
       </ResponsiveContainer>
     );
@@ -265,6 +431,7 @@ export const EnergyChart = memo(function EnergyChart({
           strokeDasharray="5 5"
           dot={false}
         />
+        {renderTeacherBars("left")}
       </ComposedChart>
     </ResponsiveContainer>
   );

@@ -4,6 +4,7 @@ import type {
   User, Classroom, Schedule, AttendanceSession, 
   EnergyLog, EnergyReport, DashboardData, LoginResponse,
   TeacherEnergyUsage, TeacherEnergySummary, TeacherEnergyByClassroom, TeacherEnergyByDate,
+  TeacherEnergyBreakdown,
   OverrideRFID,
   MaintenanceRFID,
   SystemConfig,
@@ -460,6 +461,23 @@ class ApiService {
     return this.request<{ message: string }>('/teacher-energy/recalculate/', {
       method: 'POST',
     });
+  }
+
+  async getTeacherEnergyBreakdown(params?: {
+    classroom?: number;
+    range?: 'hour' | 'day' | 'week' | 'month';
+    start?: string;
+    end?: string;
+  }): Promise<TeacherEnergyBreakdown[]> {
+    const sp = new URLSearchParams();
+    if (params?.classroom) sp.append('classroom', params.classroom.toString());
+    if (params?.range)     sp.append('range',     params.range);
+    if (params?.start)     sp.append('start',     params.start);
+    if (params?.end)       sp.append('end',       params.end);
+    const q = sp.toString();
+    return this.request<TeacherEnergyBreakdown[]>(
+      `/energy/teacher-breakdown/${q ? `?${q}` : ''}`
+    );
   }
 }
 
