@@ -327,7 +327,10 @@ export function EnergyReportsPage() {
             to={dateTo}
             onFromChange={setDateFrom}
             onToChange={setDateTo}
-            onClear={() => { setDateFrom(""); setDateTo(""); }}
+            onClear={() => {
+              setDateFrom("");
+              setDateTo("");
+            }}
           />
         </CardContent>
       </Card>
@@ -464,7 +467,12 @@ export function EnergyReportsPage() {
               {dateFrom || dateTo
                 ? `Custom range: ${dateFrom || "…"} to ${dateTo || "…"}`
                 : `Aggregated over the selected ${
-                    { hour: "hourly", day: "daily", week: "weekly", month: "monthly" }[selectedRange]
+                    {
+                      hour: "hourly",
+                      day: "daily",
+                      week: "weekly",
+                      month: "monthly",
+                    }[selectedRange]
                   } range`}
             </p>
           </CardHeader>

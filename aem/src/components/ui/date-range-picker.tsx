@@ -36,7 +36,9 @@ export function DateRangePicker({
             value={from}
             max={to || undefined}
             onChange={(e) => onFromChange(e.target.value)}
-            className={hasError ? "border-red-500 focus-visible:ring-red-400" : ""}
+            className={
+              hasError ? "border-red-500 focus-visible:ring-red-400" : ""
+            }
           />
         </div>
         <div className="flex-1">
@@ -49,7 +51,9 @@ export function DateRangePicker({
             value={to}
             min={from || undefined}
             onChange={(e) => onToChange(e.target.value)}
-            className={hasError ? "border-red-500 focus-visible:ring-red-400" : ""}
+            className={
+              hasError ? "border-red-500 focus-visible:ring-red-400" : ""
+            }
           />
         </div>
         {hasValues && (
@@ -64,11 +68,14 @@ export function DateRangePicker({
         )}
       </div>
       {hasError && (
-        <p className="text-xs text-red-500">Start date must be before end date.</p>
+        <p className="text-xs text-red-500">
+          Start date must be before end date.
+        </p>
       )}
       {!hasValues && (
         <p className="text-xs text-gray-400 dark:text-gray-500">
-          Leave blank to use the default rolling window for the selected grouping.
+          Leave blank to use the default rolling window for the selected
+          grouping.
         </p>
       )}
     </div>
