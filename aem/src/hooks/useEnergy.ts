@@ -6,6 +6,8 @@ import wsService from '../services/websocket';
 interface EnergyFilters {
   classroom?: number;
   range?: 'hour' | 'day' | 'week' | 'month';
+  start?: string;
+  end?: string;
 }
 
 // Debounce delay for power updates (ms)
@@ -34,12 +36,18 @@ export function useEnergy(filters: EnergyFilters = {}) {
       if (showLoading && !hasInitialLoadRef.current) {
         setIsLoading(true);
       }
-      const params: { classroom?: number; range?: 'hour' | 'day' | 'week' | 'month' } = {
+      const params: { classroom?: number; range?: 'hour' | 'day' | 'week' | 'month'; start?: string; end?: string } = {
         range: filtersRef.current.range || 'day',
       };
 
       if (filtersRef.current.classroom) {
         params.classroom = filtersRef.current.classroom;
+      }
+      if (filtersRef.current.start) {
+        params.start = filtersRef.current.start;
+      }
+      if (filtersRef.current.end) {
+        params.end = filtersRef.current.end;
       }
 
       const data = await apiService.getEnergyReport(params);
@@ -71,7 +79,7 @@ export function useEnergy(filters: EnergyFilters = {}) {
     // Reset initial load flag when filters change
     hasInitialLoadRef.current = false;
     fetchData(true);
-  }, [filters.classroom, filters.range, fetchData]);
+  }, [filters.classroom, filters.range, filters.start, filters.end, fetchData]);
 
   useEffect(() => {
     // Connect to WebSocket

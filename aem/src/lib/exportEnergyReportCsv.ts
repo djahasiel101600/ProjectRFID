@@ -11,6 +11,10 @@ export interface ExportEnergyCsvOptions {
   classroomLabel: string;
   /** Human-readable period label (same as table) */
   formatPeriod: (periodIso: string) => string;
+  /** ISO date string (YYYY-MM-DD) for custom range start */
+  start?: string;
+  /** ISO date string (YYYY-MM-DD) for custom range end */
+  end?: string;
 }
 
 /**
@@ -22,13 +26,18 @@ export function exportEnergyReportsToCsv(
 ): void {
   if (!reports.length) return;
 
-  const { range, classroomLabel, formatPeriod } = options;
+  const { range, classroomLabel, formatPeriod, start, end } = options;
   const rangeLabels: Record<string, string> = {
     hour: "Hourly (Last 24 Hours)",
     day: "Daily (Last 30 Days)",
     week: "Weekly (Last 12 Weeks)",
     month: "Monthly (Last Year)",
   };
+
+  const windowLabel =
+    start || end
+      ? `${start ?? "…"} to ${end ?? "…"}`
+      : rangeLabels[range] ?? range;
 
   const header = [
     "Period",
@@ -52,7 +61,7 @@ export function exportEnergyReportsToCsv(
 
   const metaLines = [
     `Classroom,${escapeCsvCell(classroomLabel)}`,
-    `Time range,${escapeCsvCell(rangeLabels[range] ?? range)}`,
+    `Time range,${escapeCsvCell(windowLabel)}`,
     "",
   ];
 
@@ -68,10 +77,13 @@ export function exportEnergyReportsToCsv(
   });
   const url = URL.createObjectURL(blob);
   const a = document.createElement("a");
-  const stamp = new Date().toISOString().slice(0, 19).replace(/[:T]/g, "-");
   const safeClass = classroomLabel.replace(/[^a-zA-Z0-9-_]+/g, "_").slice(0, 40);
+  const filenameDatePart =
+    start || end
+      ? `${start ?? "from"}_to_${end ?? "now"}`
+      : new Date().toISOString().slice(0, 10);
   a.href = url;
-  a.download = `energy-report_${range}_${safeClass}_${stamp}.csv`;
+  a.download = `energy-report_${range}_${safeClass}_${filenameDatePart}.csv`;
   a.click();
   URL.revokeObjectURL(url);
 }

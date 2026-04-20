@@ -4,6 +4,7 @@ import { useEnergy } from "../hooks/useEnergy";
 import { EnergyChart } from "../components/EnergyChart";
 import { parseLocalDateTime, formatIsoWeekRangeLabel } from "../lib/utils";
 import { exportEnergyReportsToCsv } from "../lib/exportEnergyReportCsv";
+import { DateRangePicker } from "../components/ui/date-range-picker";
 import {
   Card,
   CardContent,
@@ -57,6 +58,13 @@ export function EnergyReportsPage() {
   const [selectedRange, setSelectedRange] = useState<
     "hour" | "day" | "week" | "month"
   >("day");
+  const [dateFrom, setDateFrom] = useState<string>("");
+  const [dateTo, setDateTo] = useState<string>("");
+
+  const dateRangeError =
+    dateFrom && dateTo && dateFrom > dateTo
+      ? "Start date must be before end date"
+      : undefined;
 
   // Teacher breakdown state
   const [teacherBreakdown, setTeacherBreakdown] = useState<
@@ -69,8 +77,10 @@ export function EnergyReportsPage() {
     () => ({
       classroom: selectedClassroom ? parseInt(selectedClassroom) : undefined,
       range: selectedRange,
+      start: dateFrom && !dateRangeError ? dateFrom : undefined,
+      end: dateTo && !dateRangeError ? dateTo : undefined,
     }),
-    [selectedClassroom, selectedRange],
+    [selectedClassroom, selectedRange, dateFrom, dateTo, dateRangeError],
   );
 
   // Use the real-time energy hook
@@ -96,10 +106,12 @@ export function EnergyReportsPage() {
       .getTeacherEnergyBreakdown({
         classroom: selectedClassroom ? parseInt(selectedClassroom) : undefined,
         range: selectedRange,
+        start: dateFrom && !dateRangeError ? dateFrom : undefined,
+        end: dateTo && !dateRangeError ? dateTo : undefined,
       })
       .then(setTeacherBreakdown)
       .catch((err) => console.error("Failed to load teacher breakdown:", err));
-  }, [selectedClassroom, selectedRange]);
+  }, [selectedClassroom, selectedRange, dateFrom, dateTo, dateRangeError]);
 
   const uniqueTeachers = useMemo(() => {
     const seen = new Set<number>();
@@ -228,6 +240,8 @@ export function EnergyReportsPage() {
       range: selectedRange,
       classroomLabel,
       formatPeriod: (p) => formatPeriod(p),
+      start: dateFrom || undefined,
+      end: dateTo || undefined,
     });
   };
 
@@ -262,7 +276,7 @@ export function EnergyReportsPage() {
         <CardHeader>
           <CardTitle className="text-lg">Filters</CardTitle>
         </CardHeader>
-        <CardContent>
+        <CardContent className="space-y-4">
           <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
             <div>
               <Label htmlFor="classroom">Classroom</Label>
@@ -280,7 +294,7 @@ export function EnergyReportsPage() {
               </Select>
             </div>
             <div>
-              <Label htmlFor="range">Time Range</Label>
+              <Label htmlFor="range">Group By</Label>
               <Select
                 id="range"
                 value={selectedRange}
@@ -290,23 +304,31 @@ export function EnergyReportsPage() {
                   )
                 }
               >
-                <option value="hour">Hourly (Last 24 Hours)</option>
-                <option value="day">Daily (Last 30 Days)</option>
-                <option value="week">Weekly (Last 12 Weeks)</option>
-                <option value="month">Monthly (Last Year)</option>
+                <option value="hour">Hourly</option>
+                <option value="day">Daily</option>
+                <option value="week">Weekly</option>
+                <option value="month">Monthly</option>
               </Select>
             </div>
             <div className="flex items-end">
-              <Button
+              <button
+                type="button"
                 onClick={handleGenerateReport}
-                className="w-full"
-                disabled={isRefreshing}
+                disabled={isRefreshing || !!dateRangeError}
                 title="Refresh data from server and download CSV"
+                className="w-full h-9 rounded-md bg-primary px-4 text-sm font-medium text-primary-foreground shadow transition-colors hover:bg-primary/90 disabled:cursor-not-allowed disabled:opacity-50"
               >
                 {isRefreshing ? "Generating…" : "Generate Report"}
-              </Button>
+              </button>
             </div>
           </div>
+          <DateRangePicker
+            from={dateFrom}
+            to={dateTo}
+            onFromChange={setDateFrom}
+            onToChange={setDateTo}
+            onClear={() => { setDateFrom(""); setDateTo(""); }}
+          />
         </CardContent>
       </Card>
 
@@ -439,16 +461,11 @@ export function EnergyReportsPage() {
           <CardHeader>
             <CardTitle>Teacher Consumption Breakdown</CardTitle>
             <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">
-              Aggregated over the selected{" "}
-              {
-                {
-                  hour: "hourly",
-                  day: "daily",
-                  week: "weekly",
-                  month: "monthly",
-                }[selectedRange]
-              }{" "}
-              range
+              {dateFrom || dateTo
+                ? `Custom range: ${dateFrom || "…"} to ${dateTo || "…"}`
+                : `Aggregated over the selected ${
+                    { hour: "hourly", day: "daily", week: "weekly", month: "monthly" }[selectedRange]
+                  } range`}
             </p>
           </CardHeader>
           <CardContent className="space-y-6">
